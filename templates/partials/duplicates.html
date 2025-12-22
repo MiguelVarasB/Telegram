@@ -1,0 +1,327 @@
+<div class="section-title">Posibles duplicados</div>
+
+<div class="dupes-toolbar">
+    <div class="dupes-toolbar-left">
+        <label class="dupes-check"><input type="checkbox" id="dupe-by-name" checked> Mismo nombre</label>
+        <label class="dupes-check"><input type="checkbox" id="dupe-by-duration" checked> Misma duración</label>
+        <label class="dupes-check"><input type="checkbox" id="dupe-by-video-size" checked> Mismo peso</label>
+        <label class="dupes-check"><input type="checkbox" id="dupe-by-thumb" checked> Misma thumb</label>
+
+        <label class="dupes-field">Tolerancia duración (s)
+            <input type="number" id="dupe-duration-tol" value="0" min="0" max="60">
+        </label>
+        <label class="dupes-field">Tolerancia peso (bytes)
+            <input type="number" id="dupe-size-tol" value="0" min="0" max="50000000" step="1024">
+        </label>
+        <label class="dupes-field">Thumb por
+            <select id="dupe-thumb-mode">
+                <option value="wh">ancho/alto</option>
+                <option value="bytes" selected>peso archivo</option>
+                <option value="sim">semejanza (GPU)</option>
+            </select>
+        </label>
+        <label class="dupes-field">Umbral semejanza (0.50-0.99)
+            <input type="number" id="dupe-sim-threshold" value="0.92" min="0.5" max="0.99" step="0.01">
+        </label>
+
+        <label class="dupes-field">Mín. tamaño grupo
+            <input type="number" id="dupe-min-group" value="2" min="2" max="50">
+        </label>
+        <label class="dupes-field">Límite scan
+            <input type="number" id="dupe-limit" value="100" min="1" max="200000" step="1000">
+        </label>
+
+        <button id="dupe-run" class="dupes-btn" type="button">Analizar</button>
+    </div>
+
+    <div class="dupes-toolbar-right">
+        <div id="dupe-summary" class="dupes-summary"></div>
+        <button id="dupe-hide" class="dupes-btn" type="button" disabled>Ocultar duplicados</button>
+    </div>
+</div>
+
+<div id="dupe-groups" class="dupes-groups" data-dump-channel-id="{{ dump_channel_id | default('') }}"></div>
+
+<script>
+(function () {
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function formatSeconds(s) {
+        var n = Number(s);
+        if (!isFinite(n) || n < 0) return '';
+        n = Math.trunc(n);
+        var mins = Math.floor(n / 60);
+        var secs = n % 60;
+        var hours = Math.floor(mins / 60);
+        mins = mins % 60;
+        if (hours > 0) return hours + ':' + String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0');
+        return mins + ':' + String(secs).padStart(2,'0');
+    }
+
+    function getParams() {
+        var byName = document.getElementById('dupe-by-name')?.checked;
+        var byDuration = document.getElementById('dupe-by-duration')?.checked;
+        var byVideoSize = document.getElementById('dupe-by-video-size')?.checked;
+        var byThumb = document.getElementById('dupe-by-thumb')?.checked;
+        var durationTol = Number(document.getElementById('dupe-duration-tol')?.value || 0);
+        var sizeTol = Number(document.getElementById('dupe-size-tol')?.value || 0);
+        var thumbMode = document.getElementById('dupe-thumb-mode')?.value || 'wh';
+        var simThreshold = Number(document.getElementById('dupe-sim-threshold')?.value || 0.92);
+        var limit = Number(document.getElementById('dupe-limit')?.value || 50000);
+        var minGroupSize = Number(document.getElementById('dupe-min-group')?.value || 2);
+
+        var bySimilarity = byThumb && thumbMode === 'sim';
+        var byThumbSize = byThumb && thumbMode !== 'sim';
+
+        return {
+            by_name: byName ? 'true' : 'false',
+            by_duration: byDuration ? 'true' : 'false',
+            by_video_size: byVideoSize ? 'true' : 'false',
+            by_thumb_size: byThumbSize ? 'true' : 'false',
+            by_similarity: bySimilarity ? 'true' : 'false',
+            duration_tol: String(Math.max(0, Math.min(60, Math.trunc(durationTol || 0)))),
+            size_tol_bytes: String(Math.max(0, Math.min(50000000, Math.trunc(sizeTol || 0)))),
+            thumb_mode: thumbMode,
+            similarity_threshold: String(Math.max(0.5, Math.min(0.99, simThreshold || 0.5))),
+            limit: String(Math.max(1, Math.min(200000, Math.trunc(limit || 1)))),
+            min_group_size: String(Math.max(2, Math.min(50, Math.trunc(minGroupSize || 2))))
+        };
+    }
+
+    function setGroupSelection(groupEl, mode) {
+        var checks = groupEl.querySelectorAll('input.dupe-item-check');
+        if (!checks.length) return;
+        var keepIndex = parseInt(groupEl.getAttribute('data-keep-index') || '0', 10);
+
+        if (mode === 'all') {
+            checks.forEach(function (c) { c.checked = true; });
+            return;
+        }
+        if (mode === 'none') {
+            checks.forEach(function (c) { c.checked = false; });
+            return;
+        }
+        if (mode === 'all_but_one') {
+            checks.forEach(function (c, idx) { c.checked = idx !== keepIndex; });
+            return;
+        }
+    }
+
+    function renderGroups(data) {
+        var wrap = document.getElementById('dupe-groups');
+        var summary = document.getElementById('dupe-summary');
+        var dumpChannelId = Number(wrap?.getAttribute('data-dump-channel-id') || '') || null;
+        if (!wrap) return;
+
+        var scanned = data?.scanned || 0;
+        var groups = Array.isArray(data?.groups) ? data.groups : [];
+
+        if (summary) {
+            summary.textContent = 'Analizados: ' + scanned + ' · Grupos: ' + groups.length;
+        }
+
+        if (!groups.length) {
+            wrap.innerHTML = '<div class="dupes-empty">No se encontraron grupos con los criterios seleccionados.</div>';
+            return;
+        }
+
+        var html = '';
+
+        groups.forEach(function (g, gidx) {
+            var items = Array.isArray(g.items) ? g.items : [];
+            var key = g.key || {};
+            var keepIndex = 0;
+            if (dumpChannelId !== null) {
+                var idxKeep = items.findIndex(function (it) { return Number(it.chat_id) === dumpChannelId; });
+                if (idxKeep >= 0) keepIndex = idxKeep;
+            }
+
+            var keyParts = [];
+            if (key.name !== undefined) keyParts.push('Nombre: ' + (key.name || '(vacío)'));
+            if (key.duration !== undefined) keyParts.push('Duración: ' + formatSeconds(key.duration || 0));
+            if (key.video_size !== undefined) keyParts.push('Peso: ' + (key.video_size || 0) + ' bytes');
+            if (key.thumb !== undefined) keyParts.push('Thumb: ' + JSON.stringify(key.thumb));
+            if (key.similarity_cluster !== undefined) keyParts.push('Semejanza cluster: ' + key.similarity_cluster + ' (>= ' + (key.threshold || '') + ')');
+
+            html += '<div class="dupe-group" data-group-index="' + String(gidx) + '" data-keep-index="' + String(keepIndex) + '">';
+            html +=   '<div class="dupe-group-head">'
+                   +     '<div class="dupe-group-title">Grupo #' + (gidx + 1) + ' · ' + items.length + ' items</div>'
+                   +     '<div class="dupe-group-key">' + escapeHtml(keyParts.join(' · ')) + '</div>'
+                   +   '</div>';
+
+            html +=   '<div class="dupe-group-actions">'
+                   +     '<button type="button" class="dupes-btn dupe-select-all" data-mode="all">Seleccionar todos</button>'
+                   +     '<button type="button" class="dupes-btn dupe-select-all" data-mode="all_but_one">Seleccionar todos menos 1</button>'
+                   +     '<button type="button" class="dupes-btn dupe-select-all" data-mode="none">Ninguno</button>'
+                   +   '</div>';
+
+            html +=   '<div class="dupe-items">';
+
+            items.forEach(function (it, idx) {
+                console.log(it)
+                var name = escapeHtml(it.nombre || 'Video');
+                var chatId = it.chat_id;
+                var msgId = it.message_id;
+                var video_id = it.video_id;
+                var msgCount = Number(it.messages_count || 0);
+                var play = it.play_link;
+                var sizeTxt = escapeHtml(it.tamano_text || '');
+                var durTxt = formatSeconds(it.duracion || 0);
+                var thumbUrl = it.thumb_url;
+                var shouldCheck = idx !== keepIndex;
+
+                html += '<div class="dupe-item">';
+                html +=   '<label class="dupe-item-check-wrap" title="Seleccionar">'
+                       +     '<input class="dupe-item-check" type="checkbox" aria-label="Seleccionar" data-chat-id="' + escapeHtml(chatId) + '" data-message-id="' + escapeHtml(msgId) + '"' + (shouldCheck ? ' checked' : '') + '>'
+                       +   '</label>';
+
+                html +=   '<a href="' + escapeHtml(play) + '" class="file-item dupe-item-card" data-item-type="video"'
+                       +   ' data-stream-url="' + escapeHtml(String(play).replace('/play/', '/video_stream/')) + '"'
+                       +   ' data-video-id="' + escapeHtml(it.video_id || '') + '"'
+                       +   ' data-name="' + name.replace(/"/g, '&quot;') + '"'
+                       +   ' data-size="' + sizeTxt.replace(/"/g, '&quot;') + '"'
+                       +   (durTxt ? ' data-duration="' + escapeHtml(durTxt) + '"' : '')
+                       +   ' data-chat-id="' + escapeHtml(chatId) + '" data-message-id="' + escapeHtml(msgId) + '"'
+                       +   '>';
+
+                html +=     '<div class="dupe-thumb">';
+                if (thumbUrl) {
+                    html += '<img src="' + escapeHtml(thumbUrl) + '" loading="lazy" />';
+                } else {
+                    html += '<div class="dupe-thumb-fallback">sin thumb</div>';
+                }
+                html +=     '</div>';
+
+                html +=     '<div class="dupe-meta">'
+                       +       '<div class="dupe-name" title="' + name + '">' + name + '</div>'
+                       +       '<div class="dupe-sub">' + sizeTxt + (durTxt ? (' · ' + escapeHtml(durTxt)) : '') +  ' - - Video id: '+video_id+'</div>'
+                       +       '<div class="dupe-sub">chat ' + escapeHtml(chatId) + ' · msg ' + escapeHtml(msgId) + ' · msgs ' + msgCount + '</div>'
+                       +     '</div>';
+
+                html +=   '</a>';
+                html += '</div>';
+            });
+
+            html +=   '</div>';
+            html += '</div>';
+        });
+
+        wrap.innerHTML = html;
+
+        wrap.querySelectorAll('.dupe-select-all').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var mode = btn.getAttribute('data-mode');
+                var groupEl = btn.closest('.dupe-group');
+                if (!groupEl) return;
+                setGroupSelection(groupEl, mode);
+            });
+        });
+    }
+
+    async function run() {
+        var btn = document.getElementById('dupe-run');
+        var wrap = document.getElementById('dupe-groups');
+        var summary = document.getElementById('dupe-summary');
+        var hideBtn = document.getElementById('dupe-hide');
+        if (wrap) wrap.innerHTML = '<div class="dupes-empty">Analizando...</div>';
+        if (summary) summary.textContent = '';
+        if (hideBtn) hideBtn.disabled = true;
+
+        var params = new URLSearchParams(getParams());
+
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Analizando...';
+        }
+
+        try {
+            var res = await fetch('/api/duplicates?' + params.toString());
+            if (!res.ok) {
+                if (wrap) wrap.innerHTML = '<div class="dupes-empty">Error al analizar duplicados.</div>';
+                return;
+            }
+            var data = await res.json();
+            renderGroups(data);
+            if (hideBtn) hideBtn.disabled = false;
+        } catch (e) {
+            if (wrap) wrap.innerHTML = '<div class="dupes-empty">Error al analizar duplicados.</div>';
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Analizar';
+            }
+        }
+    }
+
+    var runBtn = document.getElementById('dupe-run');
+    if (runBtn) runBtn.addEventListener('click', run);
+
+    async function hideSelected() {
+        var wrap = document.getElementById('dupe-groups');
+        var btn = document.getElementById('dupe-hide');
+        if (!wrap) return;
+
+        var checks = wrap.querySelectorAll('input.dupe-item-check:checked');
+        if (!checks.length) {
+            alert('Selecciona al menos un video para ocultar.');
+            return;
+        }
+
+        var items = [];
+        checks.forEach(function (c) {
+            var chatId = c.getAttribute('data-chat-id');
+            var msgId = c.getAttribute('data-message-id');
+            if (chatId && msgId) {
+                items.push({ chat_id: Number(chatId), message_id: Number(msgId) });
+            }
+        });
+
+        if (!items.length) {
+            alert('Los seleccionados no son válidos.');
+            return;
+        }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Ocultando...';
+        }
+
+        try {
+            var res = await fetch('/api/duplicates/hide', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items: items })
+            });
+            if (!res.ok) {
+                var err = await res.json().catch(function(){ return {}; });
+                alert('Error al ocultar: ' + (err.detail || res.status));
+                return;
+            }
+            var data = await res.json();
+            alert('Ocultados: ' + (data.updated || 0));
+            run(); // refrescar
+        } catch (e) {
+            alert('Error de red al ocultar duplicados.');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Ocultar duplicados';
+            }
+        }
+    }
+
+    var hideBtn = document.getElementById('dupe-hide');
+    if (hideBtn) hideBtn.addEventListener('click', hideSelected);
+
+    // Auto-ejecutar al entrar
+    run();
+})();
+</script>

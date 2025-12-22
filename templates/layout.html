@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Nube Telegram</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    
+    {% include 'partials/styles.html' %}
+</head>
+
+<body data-view-type="{{ view_type }}"{% if view_type == 'player' %} data-stream-url="{{ stream_url }}"{% endif %}>
+    {% block layout %}
+    <div class="browser-container">
+        
+        {% block top_bar %}
+            {% include 'partials/top_bar.html' %}
+        {% endblock %}
+
+        {% block main_content %}
+            {% include 'partials/content.html' %}
+        {% endblock %}
+
+    </div>
+
+    {% block video_modal %}
+        {% include 'partials/video_modal.html' %}
+    {% endblock %}
+
+    {% block stats_modal %}
+        {% include 'partials/stats_modal.html' %}
+    {% endblock %}
+
+    {% block scripts %}
+        {% include 'partials/scripts.html' %}
+    {% endblock %}
+    
+    {% endblock %}
+</body>
+</html>

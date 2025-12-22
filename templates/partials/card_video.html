@@ -1,0 +1,52 @@
+<a href="{{ item.link }}" class="file-item" data-item-type="video"
+   data-stream-url="{{ item.stream_url or item.link|replace('/play/', '/video_stream/', 1) }}"
+   data-video-id="{{ item.video_id }}"
+   data-name="{{ item.name|replace('"', '&quot;') }}"
+   data-size="{{ item.count }}"
+   {% if item.duration_text %}data-duration="{{ item.duration_text }}"{% endif %}
+   {% if item.width is defined %}data-width="{{ item.width }}"{% endif %}
+   {% if item.height is defined %}data-height="{{ item.height }}"{% endif %}
+   {% if item.mime_type is defined %}data-mime="{{ item.mime_type }}"{% endif %}
+   {% if item.date is defined and item.date %}data-date="{{ item.date }}"{% endif %}
+   {% if item.views is defined %}data-views="{{ item.views }}"{% endif %}
+   {% if item.caption is defined and item.caption %}data-caption="{{ item.caption|replace('"', '&quot;') }}"{% endif %}
+   {% if item.file_unique_id is defined %}data-file-unique-id="{{ item.file_unique_id }}"{% endif %}
+   {% if item.messages_count is defined %}data-messages-count="{{ item.messages_count }}"{% endif %}
+   {% if item.chat_id is defined %}data-chat-id="{{ item.chat_id }}"{% endif %}
+   {% if item.message_id is defined %}data-message-id="{{ item.message_id }}"{% endif %}>
+
+    <div class="icon-box video-box">
+        <div class="video-hidden-indicator" title="Marcado como oculto">
+            <i class="fas fa-eye-slash"></i>
+        </div>
+
+        <div class="video-loading-spinner" aria-hidden="true">
+            <i class="fas fa-circle-notch fa-spin"></i>
+        </div>
+
+        {% if item.photo_id %}
+            <img src="/api/photo/{{ item.photo_id }}?chat_id={{ item.chat_id }}&video_id={{ item.video_id }}" class="video-thumb" loading="lazy">
+        {% else %}
+            <i class="fas fa-file-video file-video"></i>
+        {% endif %}
+
+        {% if item.duration_text %}
+            <div class="video-duration">{{ item.duration_text }}</div>
+        {% endif %}
+    </div>
+    
+    <div class="file-name" title="{{ item.name|replace('"', '&quot;') }}">{{ item.name }}</div>
+    <div class="file-info">{{ item.count }}</div>
+    {% if item.messages_count is defined %}
+        <div class="file-info">Mensajes asociados: {{ item.messages_count }}</div>
+    {% endif %}
+    {% if item.chat_id is defined or item.message_id is defined or item.file_unique_id is defined %}
+        <div class="file-info">
+            {% if item.chat_id is defined %}Chat ID: {{ item.chat_id }}{% endif %}
+            {% if item.chat_id is defined and (item.message_id is defined or item.file_unique_id is defined) %} · {% endif %}
+            {% if item.message_id is defined %}Mensaje ID: {{ item.message_id }}{% endif %}
+            {% if item.message_id is defined and item.file_unique_id is defined %} · {% endif %}
+            {% if item.file_unique_id is defined %}File Unique ID: {{ item.file_unique_id }}{% endif %}
+        </div>
+    {% endif %}
+</a>

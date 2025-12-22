@@ -1,0 +1,190 @@
+import os
+import asyncio
+import aiosqlite
+import sys
+from pyrogram import Client
+from pyrogram.errors import FloodWait
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Importamos tu configuración
+from config import (
+    DB_PATH,
+    API_ID,
+    API_HASH,
+    SESSION_NAME,
+    CACHE_DUMP_VIDEOS_CHANNEL_ID,
+    FOLDER_SESSIONS,
+    CANALES_CON_ACCESO_FREE,
+)
+
+# --- CONFIGURACIÓN ---
+LIMITE = 1000  # Cantidad de videos a procesar en esta vuelta
+BATCH =   30  # Tamaño del paquete de reenvío (No subir de 20)
+SLEEP_ENVIO=2
+async def check_database_schema():
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("PRAGMA table_info(videos_telegram)") as cursor:
+            columns = await cursor.fetchall()
+            col_names = [col[1] for col in columns]
+            if "dump_fail" not in col_names:
+                await db.execute("ALTER TABLE videos_telegram ADD COLUMN dump_fail INTEGER DEFAULT 0")
+                await db.commit()
+
+async def marcar_fallidos(video_ids, razon):
+    if not video_ids:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        placeholders = ",".join(["?"] * len(video_ids))
+        await db.execute(
+            f"UPDATE videos_telegram SET dump_fail = 1 WHERE id IN ({placeholders})",
+            tuple(video_ids),
+        )
+        await db.commit()
+    print(f"\n🗑️ Marcados {len(video_ids)} registros como dump_fail=1. Razón: {razon}")
+
+async def marcar_chat_fallido(chat_id, razon):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE videos_telegram
+            SET dump_fail = 1
+            WHERE chat_id = ?
+
+              AND has_thumb = 0
+              AND dump_message_id IS NULL
+              AND (dump_fail IS NULL OR dump_fail = 0)
+            """,
+            (chat_id,),
+        )
+        await db.commit()
+    print(f"\n🗑️ Marcado chat {chat_id} como NO reenviable (dump_fail=1). Razón: {razon}")
+
+async def main():
+    if not CACHE_DUMP_VIDEOS_CHANNEL_ID:
+        print("❌ ERROR: Configura el CACHE_DUMP_VIDEOS_CHANNEL_ID en config.py")
+        return {
+            "pendientes": 0,
+            "reenviados": 0,
+        }
+
+    print(f"🚀 Iniciando reenvío de hasta {LIMITE} videos al canal {CACHE_DUMP_VIDEOS_CHANNEL_ID}...")
+
+    # Aseguramos carpeta de sesiones
+    os.makedirs(FOLDER_SESSIONS, exist_ok=True)
+
+    await check_database_schema()
+
+    # 1. Buscar videos pendientes en la BD
+    exclude_chats = list(CANALES_CON_ACCESO_FREE or [])
+    exclude_clause = ""
+    params = []
+    if exclude_chats:
+        placeholders = ",".join(["?"] * len(exclude_chats))
+        exclude_clause = f" AND chat_id NOT IN ({placeholders}) "
+        params.extend(exclude_chats)
+
+    params.append(LIMITE)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            f"""
+            SELECT id, chat_id, message_id 
+            FROM videos_telegram 
+            WHERE has_thumb = 0 AND dump_message_id IS NULL 
+              AND (dump_fail IS NULL OR dump_fail = 0)
+            and chat_id!=5490529645
+            {exclude_clause}
+            LIMIT ?
+        """,
+            tuple(params),
+        ) as cursor:
+            pendientes = await cursor.fetchall()
+
+    if not pendientes:
+        print("✅ No hay videos pendientes.")
+        return {
+            "pendientes": 0,
+            "reenviados": 0,
+        }
+
+    print(f"📦 Encontrados {len(pendientes)} videos. Conectando Userbot...")
+
+    # 2. Conectar Userbot (sesión guardada en la carpeta sessions)
+    session_path = os.path.join(FOLDER_SESSIONS, SESSION_NAME)
+    app = Client(session_path, api_id=API_ID, api_hash=API_HASH)
+
+    await app.start()
+
+    # 3. Agrupar por chat de origen (Telegram requiere reenviar por chat)
+    lotes = {}
+    for vid in pendientes:
+        chat_id = vid[1]
+        if chat_id not in lotes: lotes[chat_id] = []
+        lotes[chat_id].append(vid)
+
+    total_ok = 0
+
+    try:
+        # 4. Procesar reenvíos
+        for chat_origin, videos in lotes.items():
+            chat_bloqueado = False
+            # Dividir en sub-lotes de 20
+            for i in range(0, len(videos), BATCH):
+                chunk = videos[i : i + BATCH]
+                msg_ids = [v[2] for v in chunk] # Solo los IDs de los mensajes
+
+                try:
+                    print(f"   ➡️ Reenviando {len(chunk)} videos del chat {chat_origin}...", end=" ")
+                    
+                    # REENVÍO
+                    nuevos_msgs = await app.forward_messages(
+                        chat_id=CACHE_DUMP_VIDEOS_CHANNEL_ID,
+                        from_chat_id=chat_origin,
+                        message_ids=msg_ids
+                    )
+                    
+                    if not isinstance(nuevos_msgs, list):
+                        nuevos_msgs = [nuevos_msgs]
+
+                    # ACTUALIZAR BD
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        for j, msg in enumerate(nuevos_msgs):
+                            if msg:
+                                # Guardamos la referencia: video_id -> nuevo_message_id
+                                vid_id_local = chunk[j][0]
+                                await db.execute(
+                                    "UPDATE videos_telegram SET dump_message_id = ? WHERE id = ?", 
+                                    (msg.id, vid_id_local)
+                                )
+                        await db.commit()
+                    
+                    total_ok += len(nuevos_msgs)
+                    print("✅")
+                    await asyncio.sleep(SLEEP_ENVIO) # Pausa de seguridad
+
+                except FloodWait as e:
+                    print(f"\n⏳ FloodWait: Esperando {e.value} segundos...")
+                    await asyncio.sleep(e.value)
+                except Exception as e:
+                    err_id = getattr(e, "ID", "")
+                    err_txt = str(e)
+                    if err_id == "CHAT_FORWARDS_RESTRICTED" or "CHAT_FORWARDS_RESTRICTED" in err_txt:
+                        print(f"\n❌ Error: {e}")
+                        await marcar_chat_fallido(chat_origin, "CHAT_FORWARDS_RESTRICTED")
+                        chat_bloqueado = True
+                        break
+                    print(f"\n❌ Error: {e}")
+
+            if chat_bloqueado:
+                continue
+    finally:
+        await app.stop()
+    print(f"\n🏁 FIN. Total reenviados: {total_ok}")
+
+    return {
+        "pendientes": len(pendientes),
+        "reenviados": total_ok,
+    }
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Nube Telegram</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #121212;
+            --header-bg: #202020;
+            --item-hover: #303030;
+            --text-main: #ffffff;
+            --text-muted: #a8a8a8;
+            --folder-red: #f7c14b;
+            --folder-gray: #8f9bb3;
+            --file-blue: #ff3e3e;
+            --accent: #ff3e3e;
+        }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 20px;
+            overflow-y: scroll;
+        }
+        .browser-container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: #181818;
+            border-radius: 6px;
+            min-height: 80vh;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+        }
+        .top-bar {
+            background-color: var(--header-bg);
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #333;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .top-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 0;
+        }
+        .logo {
+            font-size: 18px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .logo i {
+            color: var(--file-blue);
+            font-size: 22px;
+        }
+        .breadcrumb {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .crumb-link {
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+        .crumb-link:hover {
+            color: var(--text-main);
+            text-decoration: underline;
+        }
+        .crumb-current {
+            color: var(--text-main);
+            font-weight: 500;
+        }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+        .filter-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .filter-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+        .filter-toggle input {
+            accent-color: var(--file-blue);
+            cursor: pointer;
+        }
+        .container {
+            padding: 25px;
+            flex: 1;
+        }
+        .section-title {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .grid-view {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+        }
+        .file-item {
+            background: #252525;
+            border-radius: 8px;
+            padding: 10px;
+            text-decoration: none;
+            color: inherit;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            cursor: pointer;
+            position: relative;
+            overflow: visible;
+            transition: background 0.2s ease,
+                        transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                        box-shadow 0.2s ease;
+        }
+        .file-item:hover {
+            background-color: var(--item-hover);
+            transform: translateY(-8px) scale(1.12);
+            box-shadow: 0 16px 45px rgba(0,0,0,0.8);
+            z-index: 10;
+        }
+        .file-item:active {
+            transform: translateY(-1px) scale(0.99);
+        }
+        .icon-box {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #000;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            font-size: 44px;
+            position: relative;
+        }
+        .icon-box.video-box {
+            padding: 0;
+        }
+        .icon-box.folder-box {
+            background: linear-gradient(180deg, #2c2c2c, #181818);
+        }
+        .profile-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .video-thumb {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .video-duration {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            font-family: 'Courier New', monospace;
+            z-index: 2;
+        }
+        .folder-icon {
+            font-size: 54px;
+        }
+        .folder-overlay {
+            position: absolute;
+            bottom: 10px;
+            right: 12px;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 2px solid #181818;
+            object-fit: cover;
+        }
+        .folder-root { color: var(--folder-red); }
+        .folder-chat { color: var(--folder-gray); }
+        .file-video  { color: var(--file-blue); }
+        .file-name {
+            font-size: 0.9rem;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .file-info {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .btn-back {
+            background: #333;
+            border: none;
+            color: #fff;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .btn-back:hover {
+            background: #444;
+        }
+        /* Modal de video */
+        .video-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.95);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            z-index: 2000;
+        }
+        .video-modal-overlay.is-open {
+            display: flex;
+        }
+        .video-modal {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            box-shadow: none;
+            padding: 0;
+        }
+        .video-modal video {
+            max-width: 90%;
+            max-height: 80vh;
+            background: #000;
+            outline: none;
+            box-shadow: 0 0 50px #000;
+        }
+        .modal-close {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            width: auto;
+            height: auto;
+            border: none;
+            border-radius: 0;
+            background: transparent;
+            color: #fff;
+            font-size: 40px;
+            cursor: pointer;
+        }
+        .modal-close:hover {
+            color: #ff5555;
+            background: transparent;
+        }
+        .btn-sync {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: none;
+            background: var(--accent);
+            color: #111;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .btn-sync:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+    </style>
+</head>
+
+<body data-view-type="{{ view_type }}"{% if view_type == 'player' %} data-stream-url="{{ stream_url }}"{% endif %}>
+        {% block layout %}
+        <div class="browser-container">
+            {% block top_bar %}
+            <div class="top-bar">
+                <div class="top-left">
+                    {% if parent_link %}
+                    <a href="{{ parent_link }}" class="btn-back" title="Volver">
+                        <i class="fas fa-arrow-left"></i>
+                    </a>
+                    {% endif %}
+                    <div class="logo">
+                        <i class="fas fa-cloud"></i>
+                        <span>Mi Nube Telegram</span>
+                    </div>
+                    {% if current_folder_name is defined %}
+                    <div class="breadcrumb">
+                        {% if current_folder_url is defined and current_folder_url %}
+                            <a href="{{ current_folder_url }}" class="crumb-link">{{ current_folder_name }}</a>
+                        {% else %}
+                            <span class="crumb-current">{{ current_folder_name }}</span>
+                        {% endif %}
+                        {% if current_channel_name is defined and current_channel_name %}
+                            <span>/</span>
+                            <span class="crumb-current">{{ current_channel_name }}</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="header-actions">
+                    {% if view_type == 'files' %}
+                        <span>{{ items|length }} videos</span>
+                        <div class="filter-controls">
+                            <label class="filter-toggle">
+                                <input type="checkbox" id="toggle-duplicates" checked>
+                                <span>Ocultar duplicados</span>
+                            </label>
+                        </div>
+                    {% elif view_type == 'folder' %}
+                        <span>{{ items|length }} chats</span>
+                    {% elif view_type == 'root' %}
+                        <span>Carpetas de inicio</span>
+                        <button id="btn-sync-diario" class="btn-sync" type="button">Sincronizar diario</button>
+                    {% elif view_type == 'player' %}
+                        <span>Reproductor de video</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endblock %}
+
+            {% block main_content %}
+            <div class="container" {% if current_folder_id is defined %}data-folder-id="{{ current_folder_id }}"{% endif %}>
+                {% if view_type == 'player' %}
+                    <div class="section-title">Reproductor</div>
+                    <div style="color: var(--text-muted); font-size: 0.9rem;">El video se abrirá en un modal superpuesto.</div>
+                {% else %}
+                    {% if view_type == 'files' %}
+                        <div class="section-title">Videos mostrados: {{ items|length }}</div>
+                    {% else %}
+                        <div class="section-title">Contenido</div>
+                    {% endif %}
+                    <div class="grid-view">
+                        {% for item in items %}
+                        <a href="{{ item.link }}" class="file-item" data-item-type="{{ item.type }}"
+                           {% if item.type == 'video' %}
+                           data-stream-url="{{ item.stream_url or item.link|replace('/play/', '/video_stream/', 1) }}"
+                           data-video-id="{{ item.video_id }}"
+                           data-name="{{ item.name|replace('"', '&quot;') }}"
+                           data-size="{{ item.count }}"
+                           {% if item.duration_text %}data-duration="{{ item.duration_text }}"{% endif %}
+                           {% if item.width is defined %}data-width="{{ item.width }}"{% endif %}
+                           {% if item.height is defined %}data-height="{{ item.height }}"{% endif %}
+                           {% if item.mime_type is defined %}data-mime="{{ item.mime_type }}"{% endif %}
+                           {% if item.date is defined and item.date %}data-date="{{ item.date }}"{% endif %}
+                           {% if item.views is defined %}data-views="{{ item.views }}"{% endif %}
+                           {% if item.caption is defined and item.caption %}data-caption="{{ item.caption|replace('"', '&quot;') }}"{% endif %}
+                           {% if item.chat_id is defined %}data-chat-id="{{ item.chat_id }}"{% endif %}
+                           {% if item.message_id is defined %}data-message-id="{{ item.message_id }}"{% endif %}
+                           {% endif %}>
+                            {% if item.type == 'video' %}
+                            <div class="icon-box video-box">
+                                {% if item.photo_id %}
+                                    <img src="/api/photo/{{ item.photo_id }}?chat_id={{ item.chat_id }}&video_id={{ item.video_id }}" class="video-thumb" loading="lazy">
+                                {% else %}
+                                    <i class="fas fa-file-video file-video"></i>
+                                {% endif %}
+                                {% if item.duration_text %}
+                                    <div class="video-duration">{{ item.duration_text }}</div>
+                                {% endif %}
+                            </div>
+                            {% else %}
+                            <div class="icon-box folder-box">
+                                <i class="fas fa-folder folder-chat folder-icon"></i>
+                                {% if item.photo_id %}
+                                    <img src="/api/photo/{{ item.photo_id }}?tipo=grupo" class="profile-img folder-overlay" loading="lazy">
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                            <div class="file-name" title="{{ item.name|replace('"', '&quot;') }}">{{ item.name }}</div>
+                            <div class="file-info">{{ item.count }}</div>
+                        </a>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+            {% endblock %}
+
+        </div>
+
+        {% block video_modal %}
+        <div id="video-modal-overlay" class="video-modal-overlay">
+            <div class="video-modal">
+                <button type="button" class="modal-close" id="modal-close-btn" aria-label="Cerrar reproductor">&times;</button>
+                <video id="modal-video" controls autoplay></video>
+                <div id="video-details" style="margin-top:16px; max-width:90%; color:var(--text-muted); font-size:0.85rem; line-height:1.5;">
+                    <div id="video-title" style="font-size:1rem; color:var(--text-main); font-weight:500; margin-bottom:4px;"></div>
+                    <div id="video-meta-line"></div>
+                    <div id="video-extra-line"></div>
+                    <div id="video-caption" style="margin-top:8px; white-space:pre-wrap;"></div>
+                    <div id="video-ids" style="margin-top:4px; font-size:0.8rem;"></div>
+                </div>
+                <div id="video-messages" style="margin-top:16px; max-width:90%; font-size:0.8rem; color:var(--text-muted);">
+                    <div style="font-size:0.9rem; font-weight:500; color:var(--text-main); margin-bottom:6px;">Mensajes asociados a este video</div>
+                    <div id="video-messages-container"></div>
+
+            </div>
+
+            {% block video_modal %}
+            <div id="video-modal-overlay" class="video-modal-overlay">
+                <div class="video-modal">
+                    <button type="button" class="modal-close" id="modal-close-btn" aria-label="Cerrar reproductor">&times;</button>
+                    <video id="modal-video" controls autoplay></video>
+                    <div id="video-details" style="margin-top:16px; max-width:90%; color:var(--text-muted); font-size:0.85rem; line-height:1.5;">
+                        <div id="video-title" style="font-size:1rem; color:var(--text-main); font-weight:500; margin-bottom:4px;"></div>
+                        <div id="video-meta-line"></div>
+                        <div id="video-extra-line"></div>
+                        <div id="video-caption" style="margin-top:8px; white-space:pre-wrap;"></div>
+                        <div id="video-ids" style="margin-top:4px; font-size:0.8rem;"></div>
+                    </div>
+                    <div id="video-messages" style="margin-top:16px; max-width:90%; font-size:0.8rem; color:var(--text-muted);">
+                        <div style="font-size:0.9rem; font-weight:500; color:var(--text-main); margin-bottom:6px;">Mensajes asociados a este video</div>
+                        <div id="video-messages-container"></div>
+                    </div>
+                </div>
+            </div>
+            {% endblock %}
+            var modalVideo = document.getElementById('modal-video');
+            var modalClose = document.getElementById('modal-close-btn');
+            var detailsContainer = document.getElementById('video-details');
+            var detailsTitle = document.getElementById('video-title');
+            var detailsMetaLine = document.getElementById('video-meta-line');
+            var detailsExtraLine = document.getElementById('video-extra-line');
+            var detailsCaption = document.getElementById('video-caption');
+            var detailsIds = document.getElementById('video-ids');
+            var messagesContainer = document.getElementById('video-messages-container');
+            var toggleDuplicates = document.getElementById('toggle-duplicates');
+
+            var initialStreamUrl = document.body.dataset.streamUrl || null;
+
+            function fillVideoDetailsFromElement(el) {
+                if (!detailsContainer || !el) return;
+
+                var name = el.dataset.name || '';
+                var size = el.dataset.size || '';
+                var duration = el.dataset.duration || '';
+                var width = el.dataset.width || '';
+                var height = el.dataset.height || '';
+                var mime = el.dataset.mime || '';
+                var date = el.dataset.date || '';
+                var views = el.dataset.views || '';
+                var caption = el.dataset.caption || '';
+                var chatId = el.dataset.chatId || '';
+                var messageId = el.dataset.messageId || '';
+
+                if (detailsTitle) {
+                    detailsTitle.textContent = name;
+                }
+
+                var metaParts = [];
+                if (size) metaParts.push(size);
+                if (duration) metaParts.push('Duración: ' + duration);
+                if (width && height) metaParts.push('Resolución: ' + width + 'x' + height);
+                if (mime) metaParts.push(mime);
+                if (detailsMetaLine) {
+                    detailsMetaLine.textContent = metaParts.join(' · ');
+                }
+
+                var extraParts = [];
+                if (date) extraParts.push('Fecha: ' + date);
+                if (views) extraParts.push('Vistas: ' + views);
+                if (detailsExtraLine) {
+                    detailsExtraLine.textContent = extraParts.join(' · ');
+                }
+
+                if (detailsCaption) {
+                    detailsCaption.textContent = caption;
+                }
+
+                var idParts = [];
+                if (chatId) idParts.push('Chat ID: ' + chatId);
+                if (messageId) idParts.push('Mensaje ID: ' + messageId);
+                if (detailsIds) {
+                    detailsIds.textContent = idParts.join(' · ');
+                }
+            }
+
+            function clearVideoDetails() {
+                if (detailsTitle) detailsTitle.textContent = '';
+                if (detailsMetaLine) detailsMetaLine.textContent = '';
+                if (detailsExtraLine) detailsExtraLine.textContent = '';
+                if (detailsCaption) detailsCaption.textContent = '';
+                if (detailsIds) detailsIds.textContent = '';
+            }
+
+            function clearVideoMessages() {
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = '';
+                }
+            }
+
+            async function loadVideoMessages(videoId) {
+                if (!messagesContainer) return;
+                clearVideoMessages();
+                if (!videoId) {
+                    return;
+                }
+                messagesContainer.textContent = 'Cargando mensajes...';
+                try {
+                    const res = await fetch('/api/video/' + encodeURIComponent(videoId) + '/messages');
+                    if (!res.ok) {
+                        messagesContainer.textContent = 'Error al cargar mensajes';
+                        return;
+                    }
+                    const data = await res.json();
+                    const msgs = data.messages || [];
+                    if (!msgs.length) {
+                        messagesContainer.textContent = 'No hay otros mensajes registrados para este video.';
+                        return;
+                    }
+                    let html = '';
+                    msgs.forEach(function (m) {
+                        const line1Parts = [];
+                        if (m.date) line1Parts.push(m.date);
+                        line1Parts.push('chat ' + m.chat_id + ' · msg ' + m.message_id);
+
+                        const line2Parts = [];
+                        if (m.views !== null && m.views !== undefined) line2Parts.push('Vistas: ' + m.views);
+                        if (m.forwards !== null && m.forwards !== undefined) line2Parts.push('Reenvíos: ' + m.forwards);
+                        if (m.forward_from_chat_title || m.forward_from_chat_id) {
+                            const ffTitle = m.forward_from_chat_title || '';
+                            const ffId = m.forward_from_chat_id !== null && m.forward_from_chat_id !== undefined ? (' (' + m.forward_from_chat_id + ')') : '';
+                            line2Parts.push('Forward de: ' + ffTitle + ffId);
+                        }
+
+                        const caption = m.caption || '';
+
+                        html += '<div style="margin-bottom:8px; padding:6px 8px; background:#202020; border-radius:4px;">'
+                            + '<div style="font-size:0.75rem; color:#ccc;">' + line1Parts.join(' · ') + '</div>'
+                            + '<div style="font-size:0.75rem; color:#aaa;">' + line2Parts.join(' · ') + '</div>'
+                            + (caption ? '<div style="margin-top:4px; white-space:pre-wrap;">' + caption.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>' : '')
+                            + '</div>';
+                    });
+                    messagesContainer.innerHTML = html;
+                } catch (e) {
+                    console.error('Error cargando mensajes de video', e);
+                    messagesContainer.textContent = 'Error al cargar mensajes';
+                }
+            }
+
+            function openVideoModal(url, sourceEl) {
+                if (!modalOverlay || !modalVideo || !url) return;
+                modalVideo.src = url;
+                modalVideo.load();
+                if (sourceEl) {
+                    fillVideoDetailsFromElement(sourceEl);
+                    var videoId = sourceEl.dataset.videoId || null;
+                    loadVideoMessages(videoId);
+                }
+                modalOverlay.classList.add('is-open');
+            }
+
+            function closeVideoModal() {
+                if (!modalOverlay || !modalVideo) return;
+                modalOverlay.classList.remove('is-open');
+                modalVideo.pause();
+                modalVideo.removeAttribute('src');
+                modalVideo.load();
+                clearVideoDetails();
+                clearVideoMessages();
+            }
+
+            function applyDuplicateFilter() {
+                if (!toggleDuplicates) return;
+                var hideDupes = toggleDuplicates.checked;
+                var seen = new Set();
+                var items = document.querySelectorAll('.file-item[data-item-type="video"]');
+                items.forEach(function (el) {
+                    var vid = el.dataset.videoId || '';
+                    if (!hideDupes) {
+                        el.style.display = '';
+                        return;
+                    }
+                    if (!vid) {
+                        el.style.display = '';
+                        return;
+                    }
+                    if (seen.has(vid)) {
+                        el.style.display = 'none';
+                    } else {
+                        seen.add(vid);
+                        el.style.display = '';
+                    }
+                });
+            }
+
+            if (modalOverlay) {
+                modalOverlay.addEventListener('click', function (ev) {
+                    if (ev.target === modalOverlay) {
+                        closeVideoModal();
+                    }
+                });
+            }
+            if (modalClose) {
+                modalClose.addEventListener('click', closeVideoModal);
+            }
+
+            // Delegamos el click para soportar contenido generado dinámicamente
+            document.addEventListener('click', function (event) {
+                var target = event.target.closest('.file-item[data-item-type="video"]');
+                if (!target) return;
+                var streamUrl = target.dataset.streamUrl;
+                if (!streamUrl) return;
+                event.preventDefault();
+                openVideoModal(streamUrl, target);
+            });
+
+            // Atajo para cerrar con la tecla Escape
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape' && modalOverlay.classList.contains('is-open')) {
+                    closeVideoModal();
+                }
+            });
+
+            if (initialStreamUrl) {
+                openVideoModal(initialStreamUrl, null);
+            }
+
+            if (toggleDuplicates) {
+                toggleDuplicates.addEventListener('change', applyDuplicateFilter);
+                applyDuplicateFilter();
+            }
+
+            // Función para detectar si estamos en un canal y hacer prefetch automático
+            function setupAutoPrefetch() {
+                // Detectar si estamos en una vista de canal
+                var viewType = document.body.getAttribute('data-view-type');
+                if (viewType !== 'files') return;
+                
+                // Buscar el chat_id en los elementos de video
+                var chatId = null;
+                var videoItems = document.querySelectorAll('.file-item[data-item-type="video"]');
+                if (videoItems.length > 0) {
+                    chatId = videoItems[0].dataset.chatId;
+                }
+                
+                // Si no hay videos o no tienen chat_id, intentar con la URL
+                if (!chatId) {
+                    var path = window.location.pathname;
+                    var matches = path.match(/\/channel\/(-?\d+)/);
+                    if (matches && matches[1]) {
+                        chatId = matches[1];
+                    try {
+                        const res = await fetch("/sync/diario", { method: "POST" });
+                        const data = await res.json();
+                        console.log("Sync diario:", data);
+                        alert("Sincronización completada");
+                    } catch (e) {
+                        console.error("Error sync diario", e);
+                        alert("Error al sincronizar");
+                    } finally {
+                        btnSync.disabled = false;
+                        btnSync.textContent = "Sincronizar diario";
+                    }
+                }
+            }
+        })();
+        </script>
+        {% endblock %}
+        {% endblock %}
+        <script src="/static/auto_prefetch.js"></script>
+    </body>
+</html>

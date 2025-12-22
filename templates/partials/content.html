@@ -1,0 +1,9 @@
+<div class="container" {% if current_folder_id is defined %}data-folder-id="{{ current_folder_id }}"{% endif %}>
+     {% if view_type == 'player' %}
+         {% include 'partials/player.html' %}
+     {% elif view_type == 'duplicates' %}
+         {% include 'partials/duplicates.html' %}
+     {% else %}
+         {% include 'partials/grid.html' %}
+     {% endif %}
+ </div>

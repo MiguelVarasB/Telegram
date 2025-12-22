@@ -1,0 +1,12 @@
+# --- Carpetas y Archivos específicos de tu proyecto ---
+.test/
+sessions/
+downloads/
+dumps/
+__pycache__/
+*.db*
+*.db-shm
+*.db-wal
+*.rar
+database/chats.db-shm
+downloads/.bk/5490529645_2083.json

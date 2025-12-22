@@ -1,0 +1,77 @@
+<div class="top-bar">
+    <div class="top-left">
+        {% if parent_link %}
+        <a href="{{ parent_link }}" class="btn-back" title="Volver">
+            <i class="fas fa-arrow-left"></i>
+        </a>
+        {% endif %}
+        <a href="/" class="logo" title="Ir al inicio" style="text-decoration: none; color: inherit;">
+            <i class="fas fa-cloud"></i>
+            <span>Mi Nube Telegram</span>
+        </a>
+        {% if current_folder_name is defined %}
+        <div class="breadcrumb">
+            {% if current_folder_url is defined and current_folder_url %}
+                <a href="{{ current_folder_url }}" class="crumb-link">{{ current_folder_name }}</a>
+            {% else %}
+                <span class="crumb-current">{{ current_folder_name }}</span>
+            {% endif %}
+            {% if current_channel_name is defined and current_channel_name %}
+                <span>/</span>
+                <span class="crumb-current">{{ current_channel_name }}</span>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    <div class="header-actions">
+        {% if view_type == 'files' %}
+            <span>
+                {% if pagination is defined and pagination and pagination.total_items_fmt is defined %}
+                    {{ pagination.total_items_fmt }}
+                {% elif pagination is defined and pagination and pagination.total_items is defined %}
+                    {{ pagination.total_items }}
+                {% elif total_items_fmt is defined %}
+                    {{ total_items_fmt }}
+                {% elif total_items is defined %}
+                    {{ total_items }}
+                {% else %}
+                    {{ "{:,}".format(items|length)|replace(",", ".") }}
+                {% endif %}
+                videos
+            </span>
+            <div class="filter-controls">
+                <label class="filter-toggle">
+                    <input type="checkbox" id="toggle-duplicates" checked>
+                    <span>Ocultar duplicados</span>
+                </label>
+            </div>
+        {% elif view_type == 'folder' %}
+            <span>{{ "{:,}".format(items|length)|replace(",", ".") }} chats</span>
+        {% elif view_type == 'root' %}
+            <span>Carpetas de inicio</span>
+            <button id="btn-sync-diario" class="btn-sync" type="button">Sincronizar diario</button>
+        {% elif view_type == 'player' %}
+            <span>Reproductor de video</span>
+        {% endif %}
+
+        <!-- Buscador -->
+        <form id="search-form" class="search-bar" action="javascript:void(0)" method="get">
+            <input type="text" name="q" id="search-query" placeholder="Buscar..." required>
+            <select name="scope" id="search-scope">
+                <option value="local" selected>Base local</option>
+                <option value="global">Global</option>
+            </select>
+            <select name="type" id="search-type">
+                <option value="video" selected>Videos</option>
+                <option value="enlace">Enlaces</option>
+                <option value="chat">Chats/Canales</option>
+                <option value="archivo">Archivos</option>
+            </select>
+            <button type="submit" class="btn-search">
+                <i class="fas fa-search"></i>
+            </button>
+        </form>
+
+        <button id="btn-stats" class="btn-stats" type="button">Estadísticas</button>
+    </div>
+</div>

@@ -1,0 +1,16 @@
+<a href="{{ item.link }}" class="file-item" data-item-type="{{ item.type }}">
+    <div class="icon-box folder-box">
+        <i class="fas fa-folder folder-chat folder-icon"></i>
+        {% if item.photo_id %}
+            <img src="/api/photo/{{ item.photo_id }}?tipo=grupo" class="profile-img folder-overlay" loading="lazy">
+        {% endif %}
+    </div>
+    
+    <div class="file-name" title="{{ item.name|replace('"', '&quot;') }}">{{ item.name }}</div>
+    <div class="file-info">{{ item.count }}</div>
+    {% if item.telegram_link %}
+        <span class="btn-open-telegram" data-telegram-link="{{ item.telegram_link }}" title="Abrir en Telegram">
+            <i class="fa-brands fa-telegram"></i>
+        </span>
+    {% endif %}
+</a>

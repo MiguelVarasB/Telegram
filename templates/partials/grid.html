@@ -1,0 +1,74 @@
+{% if view_type == 'files' %}
+    <div class="section-title">
+        Videos mostrados: {{ "{:,}".format(items|length)|replace(",", ".") }}
+        <div class="sort-controls">
+            <form method="get" action="{{ pagination.base_path }}">
+                <input type="hidden" name="page" value="{{ pagination.page }}">
+                <input type="hidden" name="per_page" value="{{ pagination.per_page }}">
+                <label for="sort">Ordenar por:</label>
+                <select name="sort" id="sort" onchange="this.form.submit()">
+                    <option value="fecha" {% if pagination.sort == 'fecha' %}selected{% endif %}>Fecha</option>
+                    <option value="nombre" {% if pagination.sort == 'nombre' %}selected{% endif %}>Nombre</option>
+                    <option value="duracion" {% if pagination.sort == 'duracion' %}selected{% endif %}>Duración</option>
+                </select>
+                <select name="direction" onchange="this.form.submit()">
+                    <option value="desc" {% if pagination.direction == 'desc' %}selected{% endif %}>Desc</option>
+                    <option value="asc" {% if pagination.direction == 'asc' %}selected{% endif %}>Asc</option>
+                </select>
+            </form>
+        </div>
+    </div>
+{% else %}
+    <div class="section-title">Contenido</div>
+{% endif %}
+
+{% if pagination is defined and pagination %}
+    <div class="pagination-bar">
+        <div class="pagination-info">
+            Página {% if pagination.page_fmt is defined %}{{ pagination.page_fmt }}{% else %}{{ pagination.page }}{% endif %}
+            de {% if pagination.total_pages_fmt is defined %}{{ pagination.total_pages_fmt }}{% else %}{{ pagination.total_pages }}{% endif %}
+
+            {% if pagination.total_items_fmt is defined %}
+                <span class="pagination-muted">(Total: {{ pagination.total_items_fmt }})</span>
+            {% elif pagination.total_items is defined %}
+                <span class="pagination-muted">(Total: {{ pagination.total_items }})</span>
+            {% endif %}
+        </div>
+        <div class="pagination-actions">
+            {% if pagination.has_prev %}
+                <a class="pagination-btn" href="{{ pagination.base_path }}?page={{ pagination.prev_page }}&per_page={{ pagination.per_page }}{{ pagination.query_suffix }}">Anterior</a>
+            {% else %}
+                <span class="pagination-btn is-disabled">Anterior</span>
+            {% endif %}
+
+            <div class="pagination-pages">
+                {% for p in pagination.pages %}
+                    {% if p is none %}
+                        <span class="pagination-ellipsis">…</span>
+                    {% elif p == pagination.page %}
+                        <span class="pagination-btn is-current">{{ p }}</span>
+                    {% else %}
+                        <a class="pagination-btn" href="{{ pagination.base_path }}?page={{ p }}&per_page={{ pagination.per_page }}{{ pagination.query_suffix }}">{{ p }}</a>
+                    {% endif %}
+                {% endfor %}
+            </div>
+
+            {% if pagination.has_next %}
+                <a class="pagination-btn" href="{{ pagination.base_path }}?page={{ pagination.next_page }}&per_page={{ pagination.per_page }}{{ pagination.query_suffix }}">Siguiente</a>
+            {% else %}
+                <span class="pagination-btn is-disabled">Siguiente</span>
+            {% endif %}
+        </div>
+    </div>
+{% endif %}
+
+<div class="grid-view">
+    {% for item in items %}
+        {% if item.type == 'video' %}
+            {% include 'partials/card_video.html' %}
+        {% else %}
+            {# Asumimos que si no es video, es carpeta o chat #}
+            {% include 'partials/card_folder.html' %}
+        {% endif %}
+    {% endfor %}
+</div>
