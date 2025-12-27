@@ -3,15 +3,18 @@ Configuración central.
 Agregamos configuración para Smart Cache, Sprites y BOT.
 """
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # --- TELEGRAM API (USERBOT) ---
-API_ID = 24228679
-API_HASH = "7f3be49bb9d02f8e212bf7702992a936"
-SESSION_NAME = "mi_sesion_premium"
+API_ID = int(os.getenv("API_ID", ""))
+API_HASH = os.getenv("API_HASH", "")
+SESSION_NAME = os.getenv("SESSION_NAME", "mi_sesion_premium")
 # --- TELEGRAM API (USERBOT2) ---
-API_ID2 = 23308309
-API_HASH2 = "f2c7ede77671c3e6caf4a0d94958469c"
-SESSION_NAME2 = "mi_session_free"
+API_ID2 = int(os.getenv("API_ID2", ""))
+API_HASH2 = os.getenv("API_HASH2", "")
+SESSION_NAME2 = os.getenv("SESSION_NAME2", "mi_session_free")
+
 CANALES_CON_ACCESO_FREE = [
     -1001713639965,
     -1001560601095,
@@ -26,43 +29,46 @@ CANALES_CON_ACCESO_FREE = [
 
 # --- TELEGRAM BOT API (NUEVO) ---
 # Necesario para agregar_bot_inteligente.py y auditorías
-BOT_TOKEN = "8589372190:AAGUKsQQsuPxPmfWnzEBDFfajwcgH0RfznU"
-BOT_USERNAME = "GrergBot"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8589372190:AAGUKsQQsuPxPmfWnzEBDFfajwcgH0RfznU")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "GrergBot")
 # === TUS BOTS ===
-BOT_POOL_TOKENS = [
-   BOT_TOKEN,                                         # Bot Principal (GrergBot)
-   "7695211398:AAGdLXYVVNd98f0lMSHBPNngVpUPoAtxoBY",  # Grerg2Bot
-   "8368533412:AAGYMI2iyqbV-SLiHGXx7aq9VmRjn9L-lw8",  # Grerg3Bot
-   "8426887240:AAGBf6FKUy5X71EyaCpPaA_n7eQk57MX4fM",  # Grerg4Bot
-   "7875632672:AAGT_-ZrOW1_7EzwvDGokl9P91geDN-6rv4",  # Grerg5Bot
-   "8516028474:AAFYfTFezRKYLlzl-w4Lmql8nn3z4PDAI8k",  # Grerg6Bot
-   "8365683753:AAEYkqKrvtBBWsS01u9pShrpOIuR_-_vEfY",  # Grerg7Bot
-   "8341521447:AAGnN5AJOgrUvsRgSzjLUUYyzQqlSmyqZ4I",  # Grerg8Bot
-   "7724077021:AAGt2JV5agLPxiuSZEz6QTt_-uN7x1yQBak",  # Grerg9Bot
-   "8532138853:AAFaaLEZFFWQB6WutJSquHW4-qZomk71CBo",  # Grerg10Bot
-   "8400645303:AAGawU5Z-A9bR0CXcNjH6DPulVOjHe1NAlY",  # Grerg11Bot 
-    "8390230078:AAFcwIPFsIqT04bSQUCq_nsZ4ZzLK8VB7EY",  # Grerg12Bot 
-    "7972586116:AAGqjZOOpYomxoxtNLE0Qg1rEYj_5Us_-eg",  # Grerg13Bot 
-"8513051368:AAFkJbxRDnZ5Pl3xK0uexEqh-bU9flam19M",  # Grerg14Bot 
-"8496672639:AAGDj0KcYf5LvxAiq8iZK2z5Y9ZIMZ6NBzc",  # Grerg15Bot 
-
-   "8244860201:AAG_K4_GyGKFvrM5CLZ2LRAFSpjBRuBPj_g",  # TheMiguel1Bot
-   "8510786809:AAFG8B9Tp49x0F4oKjhZ_SXXhAqQIWDrc1s",  # TheMiguel2Bot
-   "8392841964:AAERGYefWPIBUf1MycYtIR9QZ-F39YN4yvg",  # TheMiguel3Bot 
-   "8588904581:AAF11FTOTGReTqXq-eHth-Z3WNrl2t9Z3BQ",  # TheMiguel4Bot 
-   "8439231334:AAF_IlR_QPWEcEwoAcHK2huUl6PXb3SDnyQ",  # TheMiguel5Bot 
-    "8552729898:AAGB_-ALMtJEKCkqp_ZfuS2Mch39QVNPt7c",  # TheMiguel6Bot 
-    "8525414464:AAHLA930LLS-kN-Fd8UkZ9zX-BDcmMKYqTY",  # TheMiguel7Bot 
-    "8525414464:AAHLA930LLS-kN-Fd8UkZ9zX-BDcmMKYqTY",  # TheMiguel8Bot 
-     "8320807878:AAFsB3x-H0GiXBgwj8djhWc48J1P_A70NxQ",  # TheMiguel9Bot 
+_pool_env = os.getenv("BOT_POOL_TOKENS")
+if _pool_env:
+    BOT_POOL_TOKENS = [t.strip() for t in _pool_env.split(",") if t.strip()]
+else:
+    BOT_POOL_TOKENS = [
+       BOT_TOKEN,                                         # Bot Principal (GrergBot)
+       "7695211398:AAGdLXYVVNd98f0lMSHBPNngVpUPoAtxoBY",  # Grerg2Bot
+       "8368533412:AAGYMI2iyqbV-SLiHGXx7aq9VmRjn9L-lw8",  # Grerg3Bot
+       "8426887240:AAGBf6FKUy5X71EyaCpPaA_n7eQk57MX4fM",  # Grerg4Bot
+       "7875632672:AAGT_-ZrOW1_7EzwvDGokl9P91geDN-6rv4",  # Grerg5Bot
+       "8516028474:AAFYfTFezRKYLlzl-w4Lmql8nn3z4PDAI8k",  # Grerg6Bot
+       "8365683753:AAEYkqKrvtBBWsS01u9pShrpOIuR_-_vEfY",  # Grerg7Bot
+       "8341521447:AAGnN5AJOgrUvsRgSzjLUUYyzQqlSmyqZ4I",  # Grerg8Bot
+       "7724077021:AAGt2JV5agLPxiuSZEz6QTt_-uN7x1yQBak",  # Grerg9Bot
+       "8532138853:AAFaaLEZFFWQB6WutJSquHW4-qZomk71CBo",  # Grerg10Bot
+       "8400645303:AAGawU5Z-A9bR0CXcNjH6DPulVOjHe1NAlY",  # Grerg11Bot 
+       "8390230078:AAFcwIPFsIqT04bSQUCq_nsZ4ZzLK8VB7EY",  # Grerg12Bot 
+       "7972586116:AAGqjZOOpYomxoxtNLE0Qg1rEYj_5Us_-eg",  # Grerg13Bot 
+       "8513051368:AAFkJbxRDnZ5Pl3xK0uexEqh-bU9flam19M",  # Grerg14Bot 
+       "8496672639:AAGDj0KcYf5LvxAiq8iZK2z5Y9ZIMZ6NBzc",  # Grerg15Bot 
+       "8244860201:AAG_K4_GyGKFvrM5CLZ2LRAFSpjBRuBPj_g",  # TheMiguel1Bot
+       "8510786809:AAFG8B9Tp49x0F4oKjhZ_SXXhAqQIWDrc1s",  # TheMiguel2Bot
+       "8392841964:AAERGYefWPIBUf1MycYtIR9QZ-F39YN4yvg",  # TheMiguel3Bot 
+       "8588904581:AAF11FTOTGReTqXq-eHth-Z3WNrl2t9Z3BQ",  # TheMiguel4Bot 
+       "8439231334:AAF_IlR_QPWEcEwoAcHK2huUl6PXb3SDnyQ",  # TheMiguel5Bot 
+       "8552729898:AAGB_-ALMtJEKCkqp_ZfuS2Mch39QVNPt7c",  # TheMiguel6Bot 
+       "8525414464:AAHLA930LLS-kN-Fd8UkZ9zX-BDcmMKYqTY",  # TheMiguel7Bot 
+       "8525414464:AAHLA930LLS-kN-Fd8UkZ9zX-BDcmMKYqTY",  # TheMiguel8Bot 
+       "8320807878:AAFsB3x-H0GiXBgwj8djhWc48J1P_A70NxQ",  # TheMiguel9Bot 
        "8230589872:AAFTxo7zx0RSX2prWap_ZU0DjYHD-g4tSQ0",  # TheMiguel10Bot 
-      "8449820634:AAHXOn-nQwF4ln2zzFNfoBrhpDbfRQlwnKs",  # TheMiguel11Bot   
-      "8274355772:AAE4lWjThXGNBMKoSGJEkursUpMd2ZCxRTE",  # TheMiguel12Bot
+       "8449820634:AAHXOn-nQwF4ln2zzFNfoBrhpDbfRQlwnKs",  # TheMiguel11Bot   
+       "8274355772:AAE4lWjThXGNBMKoSGJEkursUpMd2ZCxRTE",  # TheMiguel12Bot
        "7956199045:AAG2WmowTq50lYN0gPMeV9lYwQ2i_mNo5_E",  # TheMiguel13Bot
        "8583323206:AAHZhcROKZ5ZAS1OzVIHfRjLfYnm2eTuJp0",  # TheMiguel14Bot  
- "8442404956:AAGVL1ypy97MepYP_1F0bmZObszrT8Rvqkk",  # TheMiguel15Bot  
+       "8442404956:AAGVL1ypy97MepYP_1F0bmZObszrT8Rvqkk",  # TheMiguel15Bot  
 
-]
+    ]
 # --- CONTROL DE VELOCIDAD DE BOTS ---
 # 1. Ritmo "Sprint" (Tiempo entre cada foto individual)
 BOT_WAIT_MIN = 3  # Mínimo de segundos a esperar
