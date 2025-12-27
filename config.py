@@ -16,7 +16,12 @@ CANALES_CON_ACCESO_FREE = [
     -1001713639965,
     -1001560601095,
     -1002349297083,
-    -1001098270440
+    -1001098270440,
+    -1002238663805,
+    -1001947662901,
+    -1001710503448,
+    -1001354611597
+
 ]
 
 # --- TELEGRAM BOT API (NUEVO) ---
@@ -60,12 +65,12 @@ BOT_POOL_TOKENS = [
 ]
 # --- CONTROL DE VELOCIDAD DE BOTS ---
 # 1. Ritmo "Sprint" (Tiempo entre cada foto individual)
-BOT_WAIT_MIN = 2  # Mínimo de segundos a esperar
-BOT_WAIT_MAX = 4  # Máximo de segundos a esperar
+BOT_WAIT_MIN = 3  # Mínimo de segundos a esperar
+BOT_WAIT_MAX = 5  # Máximo de segundos a esperar
 
 # 2. Descanso "Boxes" (Para evitar bans largos)
-BOT_BATCH_LIMIT = 19    # ¿Cada cuántas descargas paramos?
-BOT_BATCH_COOLDOWN = 10 # ¿Cuántos segundos descansamos?
+BOT_BATCH_LIMIT = 50    # ¿Cada cuántas descargas paramos?
+BOT_BATCH_COOLDOWN = 20 # ¿Cuántos segundos descansamos?
 
 # En Telegram/config.py
 CACHE_DUMP_VIDEOS_CHANNEL_ID = -1003512635282
@@ -75,7 +80,7 @@ CHUNK_SIZE = 1024 * 1024  # 1MB
 # --- SMART CACHE ---
 SMART_CACHE_ENABLED = os.getenv("SMART_CACHE_ENABLED", "1").lower() not in ("0", "false", "no", "off")
 # Límite de 2 GB para la carpeta de previsualización/caché
-MAX_DISK_CACHE_SIZE = 2 * 1024 * 1024 * 1024  
+MAX_DISK_CACHE_SIZE = 4 * 1024 * 1024 * 1024  
 # Tamaño ideal por video en disco (5 MB es un buen balance)
 TARGET_VIDEO_CACHE_SIZE = 5 * 1024 * 1024
 

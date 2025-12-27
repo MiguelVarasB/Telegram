@@ -1,6 +1,8 @@
 {% if view_type == 'files' %}
     <div class="section-title">
-        Videos mostrados: {{ "{:,}".format(items|length)|replace(",", ".") }}
+        <span id="results-title">Videos mostrados: {{ "{:,}".format(items|length)|replace(",", ".") }}</span>
+       
+        {% if pagination is defined and pagination %}
         <div class="sort-controls">
             <form method="get" action="{{ pagination.base_path }}">
                 <input type="hidden" name="page" value="{{ pagination.page }}">
@@ -17,9 +19,25 @@
                 </select>
             </form>
         </div>
+        {% endif %}
     </div>
 {% else %}
-    <div class="section-title">Contenido</div>
+    <div class="section-title results-title-bar">
+        <span id="results-title">Contenido</span>
+        <div id="limites" style="display:inline-flex" class="results-limit-control">
+            <label for="search-limit">Límite</label>
+            <input
+                type="number"
+                id="search-limit"
+                name="limit"
+                min="1"
+                max="10000"
+                value="20"
+                step="100"
+                inputmode="numeric"
+            >
+        </div>
+    </div>
 {% endif %}
 
 {% if pagination is defined and pagination %}
@@ -72,3 +90,5 @@
         {% endif %}
     {% endfor %}
 </div>
+
+Vista de los videos

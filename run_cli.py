@@ -65,8 +65,11 @@ def main() -> int:
 
     # Ejecuta con el mismo Python que ejecutó este launcher
     cmd = [sys.executable, script_path]
+    env = os.environ.copy()
+    root = _project_root()
+    env["PYTHONPATH"] = root + os.pathsep + env.get("PYTHONPATH", "")
     try:
-        return subprocess.call(cmd, cwd=_project_root())
+        return subprocess.call(cmd, cwd=root, env=env)
     except KeyboardInterrupt:
         return 130
 

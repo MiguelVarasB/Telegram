@@ -10,7 +10,7 @@
     {% include 'partials/styles.html' %}
 </head>
 
-<body data-view-type="{{ view_type }}"{% if view_type == 'player' %} data-stream-url="{{ stream_url }}"{% endif %}>
+<body data-view-type="{{ view_type }}"{% if view_type == 'player' %} data-stream-url="{{ stream_url }}"{% endif %}{% if current_channel_id is defined and current_channel_id %}data-current-channel-id="{{ current_channel_id }}"{% endif %}>
     {% block layout %}
     <div class="browser-container">
         
@@ -30,6 +30,10 @@
 
     {% block stats_modal %}
         {% include 'partials/stats_modal.html' %}
+    {% endblock %}
+
+    {% block channel_modal %}
+        {% include 'partials/channel_modal.html' %}
     {% endblock %}
 
     {% block scripts %}

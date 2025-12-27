@@ -2,7 +2,11 @@
     <div class="icon-box folder-box">
         <i class="fas fa-folder folder-chat folder-icon"></i>
         {% if item.photo_id %}
-            <img src="/api/photo/{{ item.photo_id }}?tipo=grupo" class="profile-img folder-overlay" loading="lazy">
+            <img
+                class="profile-img folder-overlay lazy-chat-photo"
+                src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+                data-src="/api/photo/{{ item.photo_id }}?tipo=grupo"
+                loading="lazy">
         {% endif %}
     </div>
     
@@ -13,4 +17,18 @@
             <i class="fa-brands fa-telegram"></i>
         </span>
     {% endif %}
+
+    <button type="button"
+            class="btn-sync open-channel-modal"
+            onclick="return window.openChannelModalFromButton && window.openChannelModalFromButton(this);"
+            data-chat-id="{{ item.chat_id }}"
+            data-chat-name="{{ item.name|replace('"', '&quot;') }}"
+            data-indexed="{{ item.indexed_videos|default('0') }}"
+            data-total="{{ item.total_videos|default('0') }}"
+            data-scanned-at="{{ item.scanned_at|default('') }}"
+            data-chat-type="{{ item.chat_type|default('') }}"
+            data-last-message="{{ item.last_message_date|default('') }}"
+            data-telegram-link="{{ item.telegram_link|default('') }}">
+        Info / Indexar
+    </button>
 </a>

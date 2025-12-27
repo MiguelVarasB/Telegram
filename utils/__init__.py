@@ -9,6 +9,7 @@ from .helpers import (
     serialize_pyrogram,
     save_image_as_webp,
     force_resolve_peer,
+    log_timing
 )
 from .websocket import FolderWSManager
 
@@ -21,4 +22,5 @@ __all__ = [
     "save_image_as_webp",
     "force_resolve_peer",
     "FolderWSManager",
+    "log_timing"
 ]

@@ -13,7 +13,8 @@ from pyrogram.raw.types import InputPeerEmpty, PeerUser, PeerChat, PeerChannel
 from config import TEMPLATES_DIR, JSON_FOLDER, MAIN_TEMPLATE
 from services import get_client, refresh_manual_folder_from_telegram
 from database import db_add_chat_folder, get_folder_items_from_db
-from utils import serialize_pyrogram, json_serial, formatear_miles
+from database.folders import get_all_chats_with_counts
+from utils import serialize_pyrogram, json_serial, log_timing
 from utils.websocket import ws_manager
 
 router = APIRouter()
@@ -27,11 +28,16 @@ async def ver_carpeta(request: Request, folder_id: int, name: str = "Carpeta"):
     lista_chats = []
     raw_dump = []
     
-    # A. CARPETAS DE SISTEMA (Inbox=0, Archivados=1)
-    if folder_id in [0, 1]:
+    # A. CARPETAS DE SISTEMA (Inbox=0, Archivados=1, Todos=-1)
+    if folder_id == -1:
+        log_timing("Iniciando carga de todos los canales ")
+        lista_chats = await get_all_chats_with_counts(name)
+        raw_dump = []
+    elif folder_id in [0, 1]:
+
         lista_chats = await get_folder_items_from_db(folder_id, name)
         raw_dump = []
-
+        
         # Si la BD no tiene datos, consultar Telegram (Fallback)
         if not lista_chats:
             try:
@@ -79,6 +85,7 @@ async def ver_carpeta(request: Request, folder_id: int, name: str = "Carpeta"):
     
     # B. CARPETAS MANUALES
     else:
+        log_timing("CARPETAS MANUALES")
         lista_chats = await get_folder_items_from_db(folder_id, name)
         raw_dump = []
         asyncio.create_task(refresh_manual_folder_from_telegram(folder_id, name))
@@ -92,7 +99,7 @@ async def ver_carpeta(request: Request, folder_id: int, name: str = "Carpeta"):
     dump_path = os.path.join(JSON_FOLDER, f"folder_dump_{folder_id}.json")
     with open(dump_path, "w", encoding="utf-8") as f:
         json.dump(dump_data_folder, f, indent=4, default=json_serial, ensure_ascii=False)
-
+    log_timing("Retornando ")
     return templates.TemplateResponse(MAIN_TEMPLATE, {
         "request": request,
         "items": lista_chats,
@@ -109,6 +116,23 @@ async def ver_carpeta(request: Request, folder_id: int, name: str = "Carpeta"):
 async def folder_ws(websocket: WebSocket, folder_id: int):
     """WebSocket para notificaciones de refresco de carpeta."""
     await ws_manager.connect(folder_id, websocket)
+    # Enviar datos iniciales en segundo plano para no bloquear la conexión
+    async def send_initial_items():
+        try:
+            if folder_id == -1:
+                items = await get_all_chats_with_counts("Todos los canales")
+            elif folder_id in [0, 1]:
+                items = await get_folder_items_from_db(folder_id, "Carpeta")
+            else:
+                items = await get_folder_items_from_db(folder_id, "Carpeta")
+            await websocket.send_json({"type": "init", "items": items})
+        except Exception as e:
+            try:
+                await websocket.send_json({"type": "error", "message": str(e)})
+            except Exception:
+                pass
+    asyncio.create_task(send_initial_items())
+
     try:
         while True:
             await websocket.receive_text()

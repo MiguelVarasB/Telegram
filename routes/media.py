@@ -7,7 +7,7 @@ import tempfile
 import asyncio
 import aiofiles
 import aiosqlite
-from fastapi import APIRouter, Request, Header, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Request, Header, HTTPException, BackgroundTasks, Query, Body
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import FileResponse, StreamingResponse
 from pyrogram.errors import FloodWait
@@ -187,13 +187,17 @@ async def player_page(request: Request, chat_id: int, message_id: int):
         "is_downloaded": is_downloaded
     })
 
-@router.get("/videos")
-async def all_videos_with_thumbs_page(
+async def _build_videos_page(
     request: Request,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(100, ge=1, le=200),
-    sort: str = Query("fecha"),
-    direction: str = Query("desc"),
+    page: int,
+    per_page: int,
+    sort: str,
+    direction: str,
+    base_path: str,
+    title: str,
+    extra_where: str = "",
+    extra_params: tuple = (),
+    view_type: str = "files",
 ):
     offset = (page - 1) * per_page
 
@@ -209,31 +213,33 @@ async def all_videos_with_thumbs_page(
 
     order_clause = f"{sort_key} {direction.upper()}, message_id DESC"
 
+    where_clause = "WHERE has_thumb = 1 AND oculto = 0"
+    if extra_where:
+        where_clause = f"{where_clause} AND {extra_where}"
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
 
         async with db.execute(
-            "SELECT COUNT(*) AS cnt FROM videos_telegram WHERE has_thumb = 1  and oculto=0"
+            f"SELECT COUNT(*) AS cnt FROM videos_telegram {where_clause}",
+            extra_params,
         ) as cursor:
             row = await cursor.fetchone()
             total_items = int((row["cnt"] if row else 0) or 0)
-            print(f"Total de videos {total_items}")
-            print(f"LIMIT:{(per_page)}")
-            
+
         async with db.execute(
-            """
+            f"""
             SELECT chat_id, message_id, nombre, caption, tamano_bytes, file_unique_id, file_id,
-                   duracion, ancho, alto, mime_type, views, fecha_mensaje
+                   duracion, ancho, alto, mime_type, views, fecha_mensaje, watch_later
             FROM videos_telegram
-            WHERE has_thumb = 1   and oculto=0
+            {where_clause}
             ORDER BY {order_clause}
             LIMIT ? OFFSET ?
-            """.format(order_clause=order_clause),
-            (per_page, offset),
+            """,
+            (*extra_params, per_page, offset),
         ) as cursor:
             rows = await cursor.fetchall()
-           
-            print(f"Total de videos a mostrar {len(rows)}")
+
         # --- Conteo de mensajes por video (batch para evitar 1M+ subqueries) ---
         messages_counts = {}
         video_ids = [r["file_unique_id"] for r in (rows or []) if r["file_unique_id"]]
@@ -277,6 +283,7 @@ async def all_videos_with_thumbs_page(
                 "width": r["ancho"],
                 "height": r["alto"],
                 "mime_type": r["mime_type"],
+                "watch_later": bool(r["watch_later"]),
                 "messages_count": messages_counts.get(video_id, 0),
             }
         )
@@ -296,9 +303,9 @@ async def all_videos_with_thumbs_page(
         {
             "request": request,
             "items": items,
-            "view_type": "files",
-            "current_folder_name": "Videos",
-            "current_folder_url": "/videos",
+            "view_type": view_type,
+            "current_folder_name": title,
+            "current_folder_url": base_path,
             "current_channel_name": None,
             "parent_link": "/",
             "total_items": total_items,
@@ -315,13 +322,56 @@ async def all_videos_with_thumbs_page(
                 "has_next": has_next,
                 "prev_page": page - 1,
                 "next_page": page + 1,
-                "base_path": "/videos",
+                "base_path": base_path,
                 "query_suffix": query_suffix,
                 "sort": sort,
                 "direction": direction,
+                "pages": page_links,
             },
         },
     )
+
+
+@router.get("/videos")
+async def all_videos_with_thumbs_page(
+    request: Request,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(100, ge=1, le=200),
+    sort: str = Query("fecha"),
+    direction: str = Query("desc"),
+):
+    return await _build_videos_page(
+        request,
+        page,
+        per_page,
+        sort,
+        direction,
+        base_path="/videos",
+        title="Videos",
+        view_type="files",
+    )
+
+
+@router.get("/watch_later")
+async def watch_later_page(
+    request: Request,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(100, ge=1, le=200),
+    sort: str = Query("fecha"),
+    direction: str = Query("desc"),
+):
+    return await _build_videos_page(
+        request,
+        page,
+        per_page,
+        sort,
+        direction,
+        base_path="/watch_later",
+        title="Ver más tarde",
+        extra_where="watch_later = 1",
+        view_type="files",
+    )
+
 
 @router.get("/video_stream/{chat_id}/{message_id}")
 async def video_stream(chat_id: int, message_id: int, range: str = Header(None)):
@@ -382,6 +432,30 @@ async def api_video_messages(video_id: str):
     # DB call async
     messages = await db_get_video_messages(video_id)
     return {"video_id": video_id, "messages": messages}
+
+
+@router.post("/api/video/{video_id}/watch_later")
+async def toggle_watch_later(video_id: str, value: bool = Body(..., embed=True)):
+    """Marca o desmarca un video como 'ver más tarde'."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE videos_telegram SET watch_later = ? WHERE id = ?",
+                (1 if value else 0, video_id),
+            )
+            await db.commit()
+            async with db.execute(
+                "SELECT watch_later FROM videos_telegram WHERE id = ?", (video_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Video no encontrado")
+                return {"video_id": video_id, "watch_later": bool(row[0])}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error al actualizar watch_later: {e}")
+        raise HTTPException(status_code=500, detail="Error al actualizar estado")
 
 @router.get("/api/photo/{file_id}")
 async def get_photo(file_id: str, tipo: str = "video", chat_id: int = None, video_id: str = None):

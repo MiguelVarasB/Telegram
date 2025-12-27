@@ -12,6 +12,7 @@
    {% if item.caption is defined and item.caption %}data-caption="{{ item.caption|replace('"', '&quot;') }}"{% endif %}
    {% if item.file_unique_id is defined %}data-file-unique-id="{{ item.file_unique_id }}"{% endif %}
    {% if item.messages_count is defined %}data-messages-count="{{ item.messages_count }}"{% endif %}
+   data-watch-later="{% if item.watch_later %}1{% else %}0{% endif %}"
    {% if item.chat_id is defined %}data-chat-id="{{ item.chat_id }}"{% endif %}
    {% if item.message_id is defined %}data-message-id="{{ item.message_id }}"{% endif %}>
 
@@ -19,6 +20,10 @@
         <div class="video-hidden-indicator" title="Marcado como oculto">
             <i class="fas fa-eye-slash"></i>
         </div>
+        <button type="button" class="btn-card-watch-later btn-watchlater-overlay" title="Ver más tarde">
+            <i class="far fa-star"></i>
+            <span>Ver después</span>
+        </button>
 
         <div class="video-loading-spinner" aria-hidden="true">
             <i class="fas fa-circle-notch fa-spin"></i>
@@ -40,6 +45,7 @@
     {% if item.messages_count is defined %}
         <div class="file-info">Mensajes asociados: {{ item.messages_count }}</div>
     {% endif %}
+
     {% if item.chat_id is defined or item.message_id is defined or item.file_unique_id is defined %}
         <div class="file-info">
             {% if item.chat_id is defined %}Chat ID: {{ item.chat_id }}{% endif %}

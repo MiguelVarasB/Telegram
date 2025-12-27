@@ -7,6 +7,41 @@ import datetime
 import aiosqlite
 from config import DB_PATH
 
+async def db_upsert_chat_basic(
+    chat_id: int,
+    name: str | None,
+    chat_type: str | None,
+    username: str | None,
+    raw_json: str | None = None,
+    last_message_date: str | None = None,
+) -> None:
+    """Inserta/actualiza un chat con los campos mínimos (Asíncrono)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO chats (chat_id, name, type, photo_id, username, raw_json, last_message_date, updated_at)
+            VALUES (?, ?, ?, NULL, ?, ?, ?, ?)
+            ON CONFLICT(chat_id) DO UPDATE SET
+                name=excluded.name,
+                type=excluded.type,
+                username=excluded.username,
+                raw_json=excluded.raw_json,
+                last_message_date=COALESCE(excluded.last_message_date, chats.last_message_date),
+                updated_at=excluded.updated_at
+            """,
+            (
+                chat_id,
+                name or "Sin Nombre",
+                chat_type,
+                username,
+                raw_json,
+                last_message_date,
+                datetime.datetime.utcnow().isoformat(),
+            ),
+        )
+        await db.commit()
+
+
 async def db_upsert_chat_from_ci(ci, last_message_date: str | None = None):
     """Guarda/actualiza un chat resuelto en la base de datos (Asíncrono)."""
     chat_id = ci.id
@@ -67,6 +102,23 @@ async def db_get_chat(chat_id: int) -> dict | None:
                 "raw_json": row[5],
                 "last_message_date": row[6],
             }
+
+
+async def db_upsert_chat_video_count(chat_id: int, videos_count: int, scanned_at: str | None = None) -> None:
+    """Inserta/actualiza el conteo de videos por chat."""
+    scanned_at = scanned_at or datetime.datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO chat_video_counts (chat_id, videos_count, scanned_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(chat_id) DO UPDATE SET
+                videos_count = excluded.videos_count,
+                scanned_at = excluded.scanned_at
+            """,
+            (chat_id, videos_count, scanned_at),
+        )
+        await db.commit()
 
 
 async def db_get_chat_folders(chat_id: int) -> list[int]:

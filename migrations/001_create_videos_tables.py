@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS videos_telegram (
     has_thumb INTEGER DEFAULT 0,
     en_mega INTEGER DEFAULT 1,
     oculto INTEGER DEFAULT 0,
+    watch_later INTEGER DEFAULT 0,
     ffmpeg_error INTEGER DEFAULT 0,
     mime_type TEXT,
     views INTEGER DEFAULT 0,

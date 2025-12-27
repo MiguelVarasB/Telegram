@@ -1,5 +1,13 @@
 # Documentación del proyecto MegaTelegram Local
 
+## Cambios recientes (dic 2025)
+- Vista “Todos los canales” optimizada: consultas separadas (chats, conteos indexados, conteos totales, carpetas) y log_timing para medir; tiempo bajó a ~2.3s.
+- Carga diferida de fotos de canal (placeholder + `data-src`).
+- Modal de info de canal con botones “Indexar faltantes” y “Abrir canal”; API `/api/channel/{chat_id}/info` y `/api/channel/{chat_id}/scan`.
+- WebSocket `/ws/folder/{folder_id}` envía `init` con items para cargar en segundo plano; frontend consume y re-renderiza.
+- Instrumentación de rendimiento en frontend (performance marks) y logs de tiempo en backend (`log_timing`).
+- Nota: mantener este documento actualizado tras cada cambio relevante (backend, frontend, DB o scripts CLI).
+
 ## 1. Visión general
 
 - **Backend:** FastAPI + Pyrogram con arquitectura modular.
@@ -34,42 +42,53 @@ Telegram/
 ├── app.py                   # Punto de entrada principal
 ├── config.py                  # Configuración centralizada
 ├── run_cli.py                 # Lanzador interactivo para ejecutar scripts dentro de CLI/
-├── CLI/                        # Scripts para ejecutar desde terminal
+├── run_cli.bat                # Script batch para ejecutar run_cli.py
+├── bot_videos.py              # Bot para manejo de videos
+├── migrar_db.py               # Script de migración de base de datos
+├── test.py                    # Script de pruebas
+├── sitios_soportados.txt      # Lista de sitios soportados
+├── iniciar_descarga_thumbs.bat # Batch para iniciar descarga de thumbnails
+├── CLI/                        # Scripts para ejecutar desde terminal (12 items)
 │   ├── descargar_dump.py
 │   ├── reenviar_videos.py
 │   ├── scan_all_channels_to_db.py
-│   └── sincronizar_db.py
-├── database/                  # Módulo de base de datos + archivo SQLite
+│   ├── sincronizar_db.py
+│   └── ... (otros 8 scripts)
+├── database/                  # Módulo de base de datos + archivo SQLite (5 items)
 │   ├── __init__.py           # Exporta funciones públicas
 │   ├── connection.py         # Conexión SQLite (async) e init_db()
 │   ├── chats.py              # Operaciones de chats (async)
 │   ├── videos.py             # Operaciones de videos y mensajes (async)
 │   ├── folders.py            # Operaciones de carpetas (async)
 │   └── chats.db              # Base de datos local (DB_PATH)
-├── services/                  # Módulo de servicios
+├── services/                  # Módulo de servicios (8 items)
 │   ├── __init__.py           # Exporta servicios públicos
 │   ├── telegram_client.py    # Cliente Pyrogram singleton
 │   ├── folder_sync.py        # Sincronización de carpetas manuales
 │   ├── video_streamer.py     # Streaming de video híbrido (Disco/RAM/Telegram)
 │   ├── memory_cache.py       # Caché en RAM de videos (buffers + metadatos)
 │   ├── disk_cache.py         # Caché inteligente en disco (LRU)
-│   └── prefetch.py           # Pre-carga de videos a Disco/RAM
-├── routes/                    # Módulo de rutas FastAPI
+│   ├── prefetch.py           # Pre-carga de videos a Disco/RAM
+│   └── ... (otro item)
+├── routes/                    # Módulo de rutas FastAPI (8 items)
 │   ├── __init__.py           # Exporta routers
 │   ├── home.py               # Ruta /
 │   ├── folders.py            # Rutas /folder/, /api/folder/, websocket
 │   ├── channels.py           # Ruta /channel/ (escaneo + guardado en BD)
-│   ├── media.py              # Rutas /play/, /video_stream/, /api/photo/, /api/download, /api/prefetch, /api/video/.../messages
-│   └── sync.py               # Ruta /sync/diario (sincronización incremental de chats)
-├── utils/                     # Módulo de utilidades
+│   ├── media.py              # Rutas /play/, /video_stream/, /api/photo/, etc.
+│   ├── sync.py               # Ruta /sync/diario (sincronización incremental)
+│   ├── search.py             # Rutas de búsqueda
+│   └── duplicates.py         # Rutas de duplicados
+├── utils/                     # Módulo de utilidades (5 items)
 │   ├── __init__.py           # Exporta helpers
 │   ├── helpers.py            # Funciones auxiliares
 │   ├── websocket.py          # FolderWSManager
-│   └── media_processor.py    # Procesador multimedia (FFmpeg: metadatos + sprites)
-├── templates/
-│   ├── layout.html           # Template principal del frontend (usa bloques + parciales)
-│   ├── mega_ui.html          # Template monolítico anterior (opcional / legacy)
-│   └── partials/             # Fragmentos reutilizables del layout
+│   ├── media_processor.py    # Procesador multimedia (FFmpeg)
+│   └── ... (otro item)
+├── templates/                 # Plantillas frontend (14 items)
+│   ├── layout.html           # Template principal
+│   ├── mega_ui.html          # Template monolítico anterior
+│   └── partials/             # Fragmentos reutilizables
 │       ├── top_bar.html
 │       ├── content.html
 │       ├── video_modal.html
@@ -78,19 +97,19 @@ Telegram/
 │       ├── grid.html
 │       ├── card_video.html
 │       ├── card_folder.html
-│       └── player.html
-├── dumps/                     # Datos locales (no contiene la BD)
+│       ├── player.html
+│       └── ... (otros 5 items)
+├── dumps/                     # Datos locales
 │   ├── json/
-│   │   ├── folder_dump_{id}.json # Estado serializado de carpetas
-│   │   ├── raw_dump_{chat_id}.json
-│   │   └── reporte_stats_*.json
 │   ├── thumbs/
-│   │   ├── videos/{chat_id}/{file_unique_id}.webp
-│   │   └── grupos_canales/{file_id}.webp
-│   ├── videos/{chat_id}/{video_id}.mp4
-│   └── smart_cache/{video_id}.cache
-└── migrations/
-    └── 001_create_videos_tables.py
+│   ├── videos/
+│   └── smart_cache/
+├── migrations/                # Migraciones de base de datos (1 item)
+│   └── 001_create_videos_tables.py
+├── static/                    # Archivos estáticos (3 items)
+├── sessions/                  # Sesiones de Telegram
+├── downloads/                 # Descargas temporales
+└── .test/                     # Directorio de pruebas
 ```
 
 ### 2.2 Módulo `config.py`
@@ -187,9 +206,14 @@ py CLI/scan_all_channels_to_db.py
 
 Notas:
 
-- Los scripts de `CLI/` agregan automáticamente la raíz del proyecto al `sys.path`, para que funcionen aunque los ejecutes como `py CLI/archivo.py`.
+- Los scripts de `CLI/` agregan automáticamente la raíz del proyecto al `sys.path`, para que funcionen aunque los ejecutes como `py CLI/archivo.py`. Además, el lanzador `run_cli.py` ahora exporta `PYTHONPATH` con la raíz del proyecto al ejecutar cualquier script, evitando errores de import (`config`, etc.) aunque arranques desde otra carpeta.
 - Los JSON generados por la app y por scripts de `CLI/` se guardan en `dumps/json/` (configurable con `JSON_FOLDER`).
 - Si usas `iniciar_descarga_thumbs.bat`, debe invocar los scripts dentro de `CLI/` (por ejemplo `py CLI\reenviar_videos.py` y `py CLI\descargar_dump.py`).
+
+### 2.2.2 Buscador (frontend)
+
+- El buscador global/local (barra superior) obtiene hasta 20 resultados por petición (`/api/search`).
+- Para evitar confusión con la paginación del listado general de videos, al iniciar una búsqueda se elimina la barra de paginación previa y solo se muestran los resultados retornados. El título de sección se actualiza a `Resultados (N)`.
 
 ### 2.3 Módulo `database/`
 
@@ -208,6 +232,7 @@ Notas:
 - `db_add_video_file_id(video_id, file_id, file_unique_id, origen)` → Registra `file_id` históricos en `video_file_ids` (async).
 - `db_upsert_video_message(message_data)` → Inserta/actualiza metadatos extendidos de mensajes en `video_messages` (async).
 - `db_get_video_messages(video_id)` → Devuelve la lista de mensajes asociados a un video (async).
+- `db_count_videos_by_chat(chat_id)` → Devuelve el número de videos en la base de datos para un chat específico.
 
 #### `folders.py`
 - `get_folder_items_from_db(folder_id)` → Lista chats de una carpeta (async).
@@ -226,6 +251,7 @@ Notas:
 - Descarga thumbnails de videos (`has_thumb = 0`) usando el canal de dump (`CACHE_DUMP_VIDEOS_CHANNEL_ID`).
 - Requiere que `dump_message_id` esté poblado (mensaje del video dentro del canal de dump).
 - Usa bots del pool (`BOT_POOL_TOKENS`) para descargar el thumb con alta concurrencia.
+- `background_thumb_downloader()`: Función que se ejecuta en segundo plano para descargar thumbnails.
 
 #### `folder_sync.py`
 - `refresh_manual_folder_from_telegram(folder_id, name)` → Sincroniza una carpeta **manual** con Telegram, actualizando la BD y notificando por WebSocket.
@@ -300,6 +326,13 @@ Notas:
 
 #### `sync.py` - Rutas de sincronización
 - `POST /sync/diario` → Ejecuta la sincronización incremental de chats para Inbox (folder_id 0) y Archivados (folder_id 1) reutilizando `GetDialogs` y guardando en `chats` + `chat_folders` solo los diálogos recientes (últimas 24h).
+
+#### `search.py` - Rutas de búsqueda
+- `GET /search` → Busca videos por término de búsqueda (título, etiquetas, etc.).
+
+#### `duplicates.py` - Rutas de duplicados
+- `GET /duplicates` → Lista videos duplicados (basado en hash o contenido similar).
+- `POST /duplicates/merge` → Fusiona videos duplicados.
 
 ---
 
@@ -555,3 +588,31 @@ Implementación:
     - Llama `fetch('/api/folder/' + folderId)` y recibe un JSON con items.
     - Vuelve a construir la grilla usando la misma lógica de iconos que en la plantilla (videos vs carpetas con foto).
     - Reaplica `applyErrorFilter()` para mantener filtrados los items con error.
+
+## Resumen de Diferencias
+
+Este documento fue actualizado el 23 de diciembre de 2025 para reflejar el estado actual del código. Las principales diferencias identificadas entre la documentación anterior y el código son:
+
+1. **Archivos nuevos en la raíz del proyecto:**
+   - `bot_videos.py`: Bot para manejo de videos.
+   - `iniciar_descarga_thumbs.bat`: Batch para iniciar descarga de thumbnails.
+   - `migrar_db.py`: Script de migración de base de datos.
+   - `run_cli.bat`: Script batch para ejecutar run_cli.py.
+   - `sitios_soportados.txt`: Lista de sitios soportados.
+   - `test.py`: Script de pruebas.
+
+2. **Directorios nuevos:**
+   - `downloads/`: Descargas temporales.
+   - `sessions/`: Sesiones de Telegram.
+   - `static/`: Archivos estáticos.
+   - `.test/`: Directorio de pruebas.
+
+3. **Actualizaciones en directorios existentes:**
+   - `CLI/`: Ahora contiene 12 scripts (antes 4).
+   - `database/`: Ahora contiene 5 archivos (antes 6).
+   - `services/`: Ahora contiene 8 archivos (antes 7).
+   - `routes/`: Ahora contiene 8 archivos (antes 6).
+   - `templates/`: Ahora contiene 14 archivos (antes 13).
+   - `utils/`: Ahora contiene 5 archivos (antes 4).
+
+Estos cambios aseguran que la documentación refleje con precisión la estructura actual del proyecto.

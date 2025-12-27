@@ -36,11 +36,21 @@ async def ver_home(request: Request):
     except Exception:
         videos_total = 0
     
+    chats_total = 0
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT COUNT(*) FROM chats") as cursor:
+                row = await cursor.fetchone()
+                chats_total = int((row[0] if row else 0) or 0)
+    except Exception:
+        chats_total = 0
+    
     lista = [
         {"name": "Videos", "count": f"{formatear_miles(videos_total)} videos", "link": "/videos", "type": "system"},
         {"name": "Duplicados", "count": "Revisión", "link": "/duplicates", "type": "system"},
         {"name": "Inbox", "count": "General", "link": "/folder/0?name=Inbox", "type": "system"},
         {"name": "Archivados", "count": "Ocultos", "link": "/folder/1?name=Archivados", "type": "system"},
+        {"name": "Todos los canales", "count": f"{formatear_miles(chats_total)} chats", "link": "/folder/-1?name=Todos%20los%20canales", "type": "system"},
     ]
     
     for f in filtros:

@@ -20,6 +20,7 @@ from database import (
 async def scan_all_channels_to_db(
     max_videos_per_chat: int | None = None,
     max_indexed_videos_per_chat: int | None = None,
+    only_chat_id: int | None = None,
 ):
     """Recorre todos los canales/supergrupos del usuario y guarda los videos en la BD.
 
@@ -40,7 +41,10 @@ async def scan_all_channels_to_db(
             # Solo canales y supergrupos
             if chat.type not in (enums.ChatType.CHANNEL, enums.ChatType.SUPERGROUP):
                 continue
-
+            
+            if only_chat_id is not None and chat.id != only_chat_id:
+                continue
+            
             indexed_count = await db_count_videos_by_chat(chat.id)
             if max_indexed_videos_per_chat is not None and indexed_count > max_indexed_videos_per_chat:
                 print(
@@ -143,6 +147,6 @@ if __name__ == "__main__":
     asyncio.run(
         scan_all_channels_to_db(
             max_videos_per_chat=None,
-            max_indexed_videos_per_chat=max_indexed,
+            max_indexed_videos_per_chat=max_indexed
         )
     )

@@ -67,11 +67,23 @@
                 <option value="chat">Chats/Canales</option>
                 <option value="archivo">Archivos</option>
             </select>
+            {% if current_channel_name is defined or current_channel_id is defined %}
+            <div class="pill current-channel-pill" title="Grupo/Canal actual">
+                <i class="fas fa-hashtag"></i>
+                <span>
+                    {{ current_channel_name if current_channel_name is defined else "" }}
+                    {% if current_channel_id is defined %} ({{ current_channel_id }}){% endif %}
+                </span>
+            </div>
+            {% endif %}
             <button type="submit" class="btn-search">
                 <i class="fas fa-search"></i>
             </button>
         </form>
 
         <button id="btn-stats" class="btn-stats" type="button">Estadísticas</button>
+        <a href="/watch_later" class="btn-watchlater-link" title="Ver más tarde">
+            <i class="fas fa-clock"></i> Ver más tarde
+        </a>
     </div>
 </div>

@@ -263,16 +263,7 @@ async def api_duplicates(
     )
 
     query_sql = f"""
-        WITH subset AS (
-            SELECT
-                chat_id, message_id, nombre, tamano_bytes, duracion,
-                file_unique_id, file_id, has_thumb, fecha_mensaje, thumb_bytes
-            FROM videos_telegram
-            {where_sql}
-            ORDER BY fecha_mensaje DESC, message_id DESC
-            LIMIT ?
-        ),
-        base AS (
+        WITH base AS (
             SELECT
                 chat_id, message_id, nombre, tamano_bytes, duracion,
                 file_unique_id, file_id, has_thumb, fecha_mensaje, thumb_bytes,
@@ -280,7 +271,8 @@ async def api_duplicates(
                 {dur_key_expr} AS key_dur,
                 {size_key_expr} AS key_size,
                 {window_count} AS grp_count
-            FROM subset
+            FROM videos_telegram
+            {where_sql}
         )
         SELECT chat_id, message_id, nombre, tamano_bytes, duracion,
                file_unique_id, file_id, has_thumb, fecha_mensaje,
@@ -288,32 +280,34 @@ async def api_duplicates(
                key_name, key_dur, key_size
         FROM base
         WHERE grp_count >= ?
-        ORDER BY fecha_mensaje DESC, message_id DESC
+        ORDER BY grp_count DESC, fecha_mensaje DESC, message_id DESC
         LIMIT ?
     """
-
+    print (query_sql)
+    print (f"Limite: {limit}")
     async with aiosqlite.connect(DB_PATH) as db:
         await _ensure_thumb_bytes_column(db)
         db.row_factory = aiosqlite.Row
         try:
             async with db.execute(
                 query_sql,
-                (limit, min_group_size, limit),
+                (min_group_size, limit),
             ) as cursor:
                 rows = await cursor.fetchall()
+               
         except sqlite3.OperationalError as e:
             if "thumb_bytes" in str(e):
                 await _ensure_thumb_bytes_column(db)
                 async with db.execute(
                     query_sql,
-                    (limit, min_group_size, limit),
+                    (min_group_size, limit),
                 ) as cursor:
                     rows = await cursor.fetchall()
             else:
                 raise
 
     rows = rows or []
-
+    print (f"cantidad: {len(rows)}")
     # Conteo de mensajes asociados por video_id (para mostrar en la tarjeta)
     video_ids = {
         (r["file_unique_id"] or "").strip()
@@ -474,7 +468,7 @@ async def api_duplicates(
             out_groups.append(g)
 
     out_groups.sort(key=lambda x: len(x.get("items") or []), reverse=True)
-
+    print(f"Grupos generados {len(out_groups)}")
     return {
         "criteria": {
             "by_name": by_name,

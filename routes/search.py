@@ -1,7 +1,7 @@
 """
 Rutas de búsqueda (local y global).
 """
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Query
 import aiosqlite
@@ -12,14 +12,18 @@ from services import get_client
 
 router = APIRouter()
 
+# Búsqueda principal; acepta alias /api/search para compatibilidad con el front.
 @router.get("/search")
 async def api_search(
     q: str = Query(..., min_length=1),
     scope: Literal["local", "global"] = "local",
-    type: Literal["video", "enlace", "chat", "archivo"] = "video",
+    type: Literal["video", "enlace", "chat", "archivo"] = "video",   
+
+    # Límite de resultados: por defecto 20, mínimo 1, máximo 100 (validado por FastAPI).
     limit: int = Query(20, ge=1, le=100),
+    chat_id: Optional[int] = Query(None),
 ):
-    return await _do_search(q, scope, type, limit)
+    return await _do_search(q, scope, type, limit, chat_id)
 
 
 @router.get("/api/search")
@@ -28,9 +32,10 @@ async def api_search_alias(
     scope: Literal["local", "global"] = "local",
     type: Literal["video", "enlace", "chat", "archivo"] = "video",
     limit: int = Query(20, ge=1, le=100),
+    chat_id: Optional[int] = Query(None),
 ):
     # Alias para evitar 404 si el front apunta a /api/search
-    return await _do_search(q, scope, type, limit)
+    return await _do_search(q, scope, type, limit, chat_id)
 
 
 async def _do_search(
@@ -38,6 +43,7 @@ async def _do_search(
     scope: Literal["local", "global"],
     type: Literal["video", "enlace", "chat", "archivo"],
     limit: int,
+    chat_id: Optional[int],
 ):
     """
     Endpoint de búsqueda.
@@ -53,19 +59,27 @@ async def _do_search(
 
     if scope == "local":
         if type == "video":
+            # Consulta en la base local; el límite se impone en SQL.
             async with aiosqlite.connect(DB_PATH) as db:
                 db.row_factory = aiosqlite.Row
-                async with db.execute(
-                    """
+                base_sql = """
                     SELECT id, chat_id, message_id, nombre, caption, fecha_mensaje,
                            duracion, tamano_bytes, mime_type, es_vertical
                     FROM videos_telegram
                     WHERE (nombre LIKE ? OR caption LIKE ?)
+                """
+                params = [q_like, q_like]
+                if chat_id is not None:
+                    base_sql += " AND chat_id = ?"
+                    params.append(chat_id)
+
+                base_sql += """
                     ORDER BY fecha_mensaje DESC
                     LIMIT ?
-                    """,
-                    (q_like, q_like, limit),
-                ) as cursor:
+                """
+                params.append(limit)
+
+                async with db.execute(base_sql, params) as cursor:
                     rows = await cursor.fetchall()
             items = [dict(r) for r in rows]
             return {"scope": scope, "type": type, "items": items}
@@ -77,7 +91,7 @@ async def _do_search(
     client = get_client()
 
     if type == "chat":
-        # Buscar en diálogos (nombres/usernames)
+        # Buscar en diálogos (nombres/usernames) y cortar tras 'limit'
         dialogs = await client.get_dialogs(limit=200)
         items = []
         for d in dialogs:
@@ -113,6 +127,7 @@ async def _do_search(
         filter=msg_filter,
         limit=limit,
     ):
+        # Adaptar el mensaje a un dict simple para el front.
         items.append(
             {
                 "chat_id": m.chat.id if m.chat else None,

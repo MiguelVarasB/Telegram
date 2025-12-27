@@ -6,6 +6,7 @@ import random
 import json
 import re
 import logging 
+
 from datetime import datetime
 import sys
 from pyrogram import Client, filters
@@ -30,6 +31,10 @@ from utils import save_image_as_webp
 
 # Logging
 logging.basicConfig(level=logging.ERROR)
+# Silenciar trazas de Pyrogram (solo criticidad alta)
+pyro_root = logging.getLogger("pyrogram")
+pyro_root.setLevel(logging.CRITICAL)
+pyro_root.propagate = True
 
 # --- VARIABLES GLOBALES DE TELEMETRÍA ---
 sync_events = {}
@@ -52,7 +57,7 @@ flood_incidents = []
 FloodWait_forzado = 120 
 LIMITE_DB=999999
 # Semáforo Global (Ajustado a 3 por seguridad de auth.ExportAuthorization)
-MAX_CONCURRENT_DOWNLOADS = 6
+MAX_CONCURRENT_DOWNLOADS = 8
 download_semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
 class LogCapture(logging.Handler):
@@ -306,6 +311,7 @@ async def worker_bot(queue, bot_token, bot_id):
                     # Verificar integridad
                     if not down or not os.path.exists(down) or os.path.getsize(down) == 0:
                         err_msg = log_capture.last_error_msg
+                        print(f"   [Bot {bot_id}] Detalle error previo al Flood forzado: {err_msg}")
                         wait_t = FloodWait_forzado
                         if "FLOOD" in err_msg.upper() or "420" in err_msg:
                             match = re.search(r"wait.*?(\d+)", err_msg, re.IGNORECASE)

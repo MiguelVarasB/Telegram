@@ -6,18 +6,19 @@ import os
 import json
 import asyncio
 import aiosqlite  # Necesario para leer rápido la BD local
-from fastapi import APIRouter, Request, BackgroundTasks
+from fastapi import APIRouter, Request, BackgroundTasks, Query, HTTPException
 from fastapi.templating import Jinja2Templates
+from fastapi.responses import JSONResponse
 from pyrogram import enums
 
 from config import TEMPLATES_DIR, JSON_FOLDER, MAIN_TEMPLATE, DB_PATH, SMART_CACHE_ENABLED
-from services import get_client, prefetch_channel_videos_to_ram 
+from services import get_client, prefetch_channel_videos_to_ram, background_thumb_downloader
 from database import (
     db_upsert_video, db_add_video_file_id, 
     db_get_chat, db_get_chat_folders,
-    db_upsert_video_message
+    db_upsert_video_message, db_count_videos_by_chat
 )
-from utils import convertir_tamano
+from utils import convertir_tamano, formatear_miles
 
 router = APIRouter()
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -30,6 +31,101 @@ def _format_duration(seconds: int) -> str:
     if hours:
         return f"{hours}:{mins:02d}:{secs:02d}"
     return f"{mins}:{secs:02d}"
+
+@router.get("/api/channel/{chat_id}/info")
+async def api_channel_info(chat_id: int):
+    """Devuelve metadatos básicos y conteo de videos del canal/chat."""
+    chat = await db_get_chat(chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat no encontrado")
+
+    indexed = await db_count_videos_by_chat(chat_id)
+    # Por ahora usamos el mismo conteo como total si no hay otra fuente
+    total = indexed
+
+    return {
+        "chat_id": chat_id,
+        "name": chat.get("name"),
+        "type": chat.get("type"),
+        "username": chat.get("username"),
+        "indexed_videos": indexed,
+        "total_videos": total,
+        "scanned_at": chat.get("last_message_date"),
+        "last_message_date": chat.get("last_message_date"),
+    }
+
+@router.post("/api/channel/{chat_id}/scan")
+async def api_channel_scan(chat_id: int, background_tasks: BackgroundTasks):
+    """Lanza el escaneo de videos faltantes en segundo plano."""
+    background_tasks.add_task(scan_channel_background, chat_id)
+    return JSONResponse({"status": "scheduled"})
+
+def _build_page_links(page: int, total_pages: int):
+    """
+    Copiado de routes.media: genera lista de páginas con elipsis.
+    """
+    if total_pages <= 12:
+        return list(range(1, total_pages + 1))
+
+    pages = []
+
+    def _push(n):
+        if n is None:
+            pages.append(None)
+            return
+        if 1 <= n <= total_pages and n not in pages:
+            pages.append(n)
+
+    if page <= 8:
+        for n in range(1, 11):
+            _push(n)
+        _push(None)
+        _push(total_pages - 1)
+        _push(total_pages)
+    elif page >= total_pages - 7:
+        _push(1)
+        _push(2)
+        _push(None)
+        for n in range(total_pages - 9, total_pages + 1):
+            _push(n)
+    else:
+        _push(1)
+        _push(2)
+        _push(None)
+        for n in range(page - 2, page + 3):
+            _push(n)
+        _push(None)
+        _push(total_pages - 1)
+        _push(total_pages)
+
+    cleaned = []
+    prev_num = None
+    for n in pages:
+        if n is None:
+            if cleaned and cleaned[-1] is not None:
+                cleaned.append(None)
+            prev_num = None
+        else:
+            if n != prev_num:
+                cleaned.append(n)
+                prev_num = n
+    if cleaned and cleaned[-1] is None:
+        cleaned.pop()
+    return cleaned
+
+async def _thumb_poller(stop_event: asyncio.Event):
+    """Dispara el worker de thumbs en bucle mientras corre el escaneo."""
+    while not stop_event.is_set():
+        try:
+            await background_thumb_downloader()
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+    # Última pasada al terminar el escaneo
+    try:
+        await background_thumb_downloader()
+    except Exception:
+        pass
 
 async def get_local_videos(chat_id: int):
     """Obtiene rápidamente los videos ya guardados en la BD para mostrar algo al usuario."""
@@ -64,6 +160,7 @@ async def get_local_videos(chat_id: int):
                     "file_unique_id": r["file_unique_id"],
                     "caption": r["caption"],
                     "duration_text": _format_duration(r["duracion"]),
+                    "duration_seconds": r["duracion"],
                     "file_size": r["tamano_bytes"],
                     "message_id": r["message_id"],
                     "views": r["views"],
@@ -86,6 +183,8 @@ async def scan_channel_background(chat_id: int):
     client = get_client()
     raw_dump = []
     count_new = 0
+    stop_event = asyncio.Event()
+    thumb_task = asyncio.create_task(_thumb_poller(stop_event))
 
     try:
         # Escaneo asíncrono de historial
@@ -161,6 +260,9 @@ async def scan_channel_background(chat_id: int):
 
     except Exception as e:
         print(f"❌ [Background] Error escaneando {chat_id}: {e}")
+    finally:
+        stop_event.set()
+        await thumb_task
 
 @router.get("/channel/{chat_id}")
 async def ver_canal(
@@ -170,6 +272,10 @@ async def ver_canal(
     name: str | None = None,
     folder_id: int | None = None,
     folder_name: str | None = None,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(100, ge=1, le=200),
+    sort: str = Query("fecha"),
+    direction: str = Query("desc"),
 ):
     """Vista de canal no bloqueante."""
     
@@ -209,14 +315,69 @@ async def ver_canal(
         current_folder_url = "/"
         parent_link = "javascript:history.back()"
 
-    # 4. Responder inmediatamente
+    # 4. Orden y paginación básica (mantener selector visible y navegable)
+    valid_sorts = {
+        "fecha": ("date", True),
+        "nombre": ("name", False),
+        "duracion": ("duration_seconds", False),
+    }
+    sort_field, _ = valid_sorts.get(sort, ("date", True))
+    direction = direction.lower()
+    reverse = direction != "asc"
+
+    if sort_field == "date":
+        videos_locales = sorted(videos_locales, key=lambda x: x.get("date") or "", reverse=reverse)
+    else:
+        videos_locales = sorted(videos_locales, key=lambda x: x.get(sort_field) or 0, reverse=reverse)
+
+    total_items = len(videos_locales)
+    per_page = max(1, min(200, per_page))
+    total_pages = max(1, (total_items + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    offset = (page - 1) * per_page
+    items_paged = videos_locales[offset : offset + per_page]
+
+    base_path = f"/channel/{chat_id}"
+    query_suffix = ""
+    if name:
+        query_suffix += f"&name={name}"
+    if folder_id is not None and folder_name:
+        query_suffix += f"&folder_id={folder_id}&folder_name={folder_name}"
+    if sort:
+        query_suffix += f"&sort={sort}"
+    if direction:
+        query_suffix += f"&direction={direction}"
+
+    pagination = {
+        "page": page,
+        "page_fmt": formatear_miles(page),
+        "per_page": per_page,
+        "total_items": total_items,
+        "total_items_fmt": formatear_miles(total_items),
+        "total_pages": total_pages,
+        "total_pages_fmt": formatear_miles(total_pages),
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
+        "prev_page": max(1, page - 1),
+        "next_page": min(total_pages, page + 1),
+        "base_path": base_path,
+        "query_suffix": query_suffix,
+        "sort": sort,
+        "direction": direction,
+        "pages": _build_page_links(page, total_pages),
+    }
+
+    # 5. Responder inmediatamente
     return templates.TemplateResponse(MAIN_TEMPLATE, {
         "request": request,
-        "items": videos_locales, # Mostramos lo que tenemos ya cacheado
+        "items": items_paged, # Mostramos lo que tenemos ya cacheado paginado
+
         "view_type": "files",
         "current_folder_name": current_folder_name,
         "current_folder_url": current_folder_url,
         "current_channel_name": name,
+        "current_channel_id": chat_id,
         "parent_link": parent_link,
-        "is_scanning": True # Flag opcional para mostrar un spinner en el frontend
+        "is_scanning": True, # Flag opcional para mostrar un spinner en el frontend
+        "pagination": pagination,
     })

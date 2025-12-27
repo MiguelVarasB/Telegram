@@ -32,6 +32,15 @@ async def init_db():
             )
         """)
         
+        # Tabla de conteos de videos por chat
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS chat_video_counts (
+                chat_id INTEGER PRIMARY KEY,
+                videos_count INTEGER DEFAULT 0,
+                scanned_at TEXT
+            )
+        """)
+        
         # Tabla de relación chat-carpeta
         await db.execute("""
             CREATE TABLE IF NOT EXISTS chat_folders (
@@ -48,8 +57,19 @@ async def init_db():
             columns = [row[1] async for row in cursor]
         
         if "last_message_date" not in columns:
-            print("🔧 Migrando BD: Agregando columna last_message_date...")
+            print(" Migrando BD: Agregando columna last_message_date...")
             await db.execute("ALTER TABLE chats ADD COLUMN last_message_date TEXT")
-        
+
+        # Asegurar columna watch_later en videos_telegram si existe la tabla
+        try:
+            async with db.execute("PRAGMA table_info(videos_telegram)") as cursor:
+                video_cols = [row[1] async for row in cursor]
+            if "watch_later" not in video_cols:
+                print(" Migrando BD: Agregando columna watch_later a videos_telegram...")
+                await db.execute("ALTER TABLE videos_telegram ADD COLUMN watch_later INTEGER DEFAULT 0")
+        except Exception:
+            # Si la tabla aún no existe, ignoramos silenciosamente
+            pass
+
         await db.commit()
-        print("✅ Base de datos inicializada (Async)")
+        print(" Base de datos inicializada (Async)")

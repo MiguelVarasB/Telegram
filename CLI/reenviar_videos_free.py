@@ -3,7 +3,8 @@ import asyncio
 import aiosqlite
 import sys
 from pyrogram import Client, idle
-from pyrogram.errors import FloodWait, PeerIdInvalid
+from pyrogram.errors import FloodWait, PeerIdInvalid, MessageIdInvalid
+
 from pyrogram.raw.functions.messages import GetDialogs
 from pyrogram.raw.types import (
     InputPeerEmpty,
@@ -30,7 +31,7 @@ from config import (
 
 # --- CONFIGURACIÓN ---
 LIMITE = 2000 
-BATCH = 50  
+BATCH = 30  
 SLEEP_ENVIO = 5 # Subido un poco para ser más orgánico
 ESPERA_CICLOS = 120
 
@@ -121,6 +122,11 @@ async def main(app: Client):
     total_ok = 0
 
     for chat_origin, videos in lotes.items():
+        # Validar que el peer exista/esté resolvible antes de enviar
+        if not await _ensure_peer(app, chat_origin):
+            await marcar_chat_fallido(chat_origin, "PEER_NOT_FOUND")
+            continue
+
         # Procesar por lotes
         for i in range(0, len(videos), BATCH):
             chunk = videos[i : i + BATCH]
@@ -153,6 +159,18 @@ async def main(app: Client):
             except FloodWait as e:
                 print(f"\n⏳ FloodWait real de Telegram: Esperando {e.value} segundos...")
                 await asyncio.sleep(e.value) # Respetamos el wait sin cerrar el cliente
+            except PeerIdInvalid:
+                await marcar_chat_fallido(chat_origin, "PEER_ID_INVALID")
+                break
+            except MessageIdInvalid:
+                await marcar_fallidos([v[0] for v in chunk], "MESSAGE_ID_INVALID")
+                print("⚠️ Lote omitido por mensajes inválidos")
+                continue
+            except ValueError as e:
+                if "Peer id invalid" in str(e):
+                    await marcar_chat_fallido(chat_origin, "PEER_ID_INVALID")
+                    break
+                raise
             except Exception as e:
                 if "CHAT_FORWARDS_RESTRICTED" in str(e):
                     await marcar_chat_fallido(chat_origin, "RESTRICTED")
