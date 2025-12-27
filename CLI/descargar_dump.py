@@ -27,7 +27,7 @@ from config import (
     BOT_BATCH_LIMIT, BOT_BATCH_COOLDOWN,
     JSON_FOLDER,
 )
-from utils import save_image_as_webp
+from utils import save_image_as_webp, log_timing
 
 # Logging
 logging.basicConfig(level=logging.ERROR)
@@ -53,12 +53,28 @@ bot_analytics = {}
 # Registro de Incidentes de Flood (NUEVO)
 # Lista de dicts: [{ 'bot': 1, 'files_before': 10, 'time_before': 50s, 'wait': 300s }]
 flood_incidents = []
+tareas_totales = 0
 
-FloodWait_forzado = 120 
+FloodWait_forzado = 20
 LIMITE_DB=999999
+
+BOTS_BLOQUEADOS=[
+       1, #Este nunca usarlo en este script
+      # 10, 
+     #  21, 
+      # 22, 
+     #  23,
+
+       17,
+       29
+]
+
+
+
 # Semáforo Global (Ajustado a 3 por seguridad de auth.ExportAuthorization)
-MAX_CONCURRENT_DOWNLOADS = 8
+MAX_CONCURRENT_DOWNLOADS = 9
 download_semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
+
 
 class LogCapture(logging.Handler):
     def __init__(self):
@@ -153,11 +169,11 @@ def generar_informe_calibracion():
         path_txt = os.path.join(JSON_FOLDER, "reporte_calibracion.txt")
         with open(path_txt, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
-        print(f"\n📄 Reporte detallado guardado en: {path_txt}")
+        log_timing(f"\n📄 Reporte detallado guardado en: {path_txt}")
         # Imprimir resumen en consola
-        print("\n".join(lines))
+        log_timing("\n".join(lines))
     except Exception as e:
-        print(f"Error guardando reporte txt: {e}")
+        log_timing(f"Error guardando reporte txt: {e}")
 
 async def monitor_loops():
     while True:
@@ -178,7 +194,7 @@ async def check_database_schema():
                 await db.commit()
 
 async def get_tareas_pendientes():
-    print("   [SQL] Consultando videos pendientes...")
+    log_timing("   [SQL] Consultando videos pendientes...")
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
             SELECT id, file_unique_id, dump_message_id, chat_id 
@@ -188,11 +204,11 @@ async def get_tareas_pendientes():
             ORDER BY fecha_mensaje DESC LIMIT ?
         """, (LIMITE_DB,)) as c:
             rows = await c.fetchall()
-            print(f"   [SQL] {len(rows)} videos encontrados.")
+            log_timing(f"   [SQL] {len(rows)} videos encontrados.")
             return rows
 
 async def marcar_completado(vid_id, thumb_size=None):
-    global conteo_global
+    global conteo_global, tareas_totales
     async with aiosqlite.connect(DB_PATH) as db:
         if thumb_size is None:
             await db.execute("UPDATE videos_telegram SET has_thumb = 1 WHERE id = ?", (vid_id,))
@@ -203,12 +219,14 @@ async def marcar_completado(vid_id, thumb_size=None):
             )
         await db.commit()
     conteo_global += 1
+    if tareas_totales:
+        if conteo_global % 100 == 0 or conteo_global == tareas_totales:
+            log_timing(f"[Progreso] Descargados {conteo_global} de {tareas_totales}")
 
 async def marcar_fallido(vid_id, razon):
     # Simplificado para no llenar logs
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE videos_telegram SET dump_fail = 1 WHERE id = ?", (vid_id,))
-        await db.commit()
 
 # --- WORKER BOT ---
 async def worker_bot(queue, bot_token, bot_id):
@@ -238,7 +256,7 @@ async def worker_bot(queue, bot_token, bot_id):
     try:
         await app.start()
         estado_bots[bot_id] = "WORKING"
-        print(f"   [Bot {bot_id}] Iniciado.")
+        log_timing(f"   [Bot {bot_id}] Iniciado.")
 
         # Bot 1 conserva su índice/sesión pero no procesa tareas
         if bot_id == 1:
@@ -311,7 +329,7 @@ async def worker_bot(queue, bot_token, bot_id):
                     # Verificar integridad
                     if not down or not os.path.exists(down) or os.path.getsize(down) == 0:
                         err_msg = log_capture.last_error_msg
-                        print(f"   [Bot {bot_id}] Detalle error previo al Flood forzado: {err_msg}")
+                        log_timing(f"   [Bot {bot_id}] Detalle error previo al Flood forzado: {err_msg}")
                         wait_t = FloodWait_forzado
                         if "FLOOD" in err_msg.upper() or "420" in err_msg:
                             match = re.search(r"wait.*?(\d+)", err_msg, re.IGNORECASE)
@@ -334,7 +352,7 @@ async def worker_bot(queue, bot_token, bot_id):
                     except Exception:
                         thumb_size = None
                     await marcar_completado(vid_id, thumb_size)
-                    print(f"   [Bot {bot_id}] OK: {unique_id}")
+                    log_timing(f"   [Bot {bot_id}] OK: {unique_id}")
                     
                     # Telemetría de éxito
                     bot_analytics[bot_id]['dl'] += 1
@@ -344,7 +362,7 @@ async def worker_bot(queue, bot_token, bot_id):
                     if os.path.exists(down): os.remove(down)
 
                 except Timeout:
-                    print(f"   [Bot {bot_id}] ⏳ Timeout 503. Reintentando...")
+                    log_timing(f"   [Bot {bot_id}] ⏳ Timeout 503. Reintentando...")
                     if down and os.path.exists(down): os.remove(down)
                     await asyncio.sleep(30)
                     await queue.put(tarea)
@@ -361,7 +379,7 @@ async def worker_bot(queue, bot_token, bot_id):
                     raise e_fw 
 
                 except Exception as e_inner:
-                    print(f"   [Bot {bot_id}] Error Red: {e_inner}")
+                    log_timing(f"   [Bot {bot_id}] Error Red: {e_inner}")
                     if down and os.path.exists(down): os.remove(down)
                     await asyncio.sleep(10)
                     await queue.put(tarea)
@@ -371,7 +389,7 @@ async def worker_bot(queue, bot_token, bot_id):
 
                 # --- CONTROL DE BOXES ---
                 if exito and descargas_session >= BOT_BATCH_LIMIT:
-                    print(f"   [Bot {bot_id}] 💤 Boxes ({BOT_BATCH_COOLDOWN}s)...")
+                    log_timing(f"   [Bot {bot_id}] 💤 Boxes ({BOT_BATCH_COOLDOWN}s)...")
                     bot_analytics[bot_id]['boxes'] += 1
                     await asyncio.sleep(BOT_BATCH_COOLDOWN)
                     
@@ -397,7 +415,7 @@ async def worker_bot(queue, bot_token, bot_id):
                 floodwait_until[bot_id] = time.time() + wait_s
                 estado_bots[bot_id] = "FLOODWAIT"
                 
-                print(f"   [Bot {bot_id}] 🛑 FLOOD {wait_s}s. (Hizo {descargas_session} en {tiempo_vivo:.1f}s)")
+                log_timing(f"   [Bot {bot_id}] 🛑 FLOOD {wait_s}s. (Hizo {descargas_session} en {tiempo_vivo:.1f}s)")
                 
                 await asyncio.sleep(wait_s)
                 
@@ -410,7 +428,7 @@ async def worker_bot(queue, bot_token, bot_id):
                 await queue.put(tarea)
 
             except Exception as e_fatal:
-                print(f"   [Bot {bot_id}] ❌ Error Fatal: {e_fatal}")
+                log_timing(f"   [Bot {bot_id}] ❌ Error Fatal: {e_fatal}")
                 await marcar_fallido(vid_id, str(e_fatal))
 
             finally:
@@ -421,7 +439,7 @@ async def worker_bot(queue, bot_token, bot_id):
         except: pass
 
 async def main(recycle_when_all_floodwait=False):
-    global conteo_global, errores_global, inicio_time
+    global conteo_global, errores_global, inicio_time, tareas_totales
     conteo_global, errores_global = 0, 0
     inicio_time = time.time()
     
@@ -430,6 +448,8 @@ async def main(recycle_when_all_floodwait=False):
     
     tareas = await get_tareas_pendientes()
     tareas_iniciales = len(tareas)
+    tareas_totales = tareas_iniciales
+
     if not tareas:
         return {"tareas_iniciales": 0, "descargas": 0, "errores": 0, "recycled": False}
 
@@ -443,11 +463,17 @@ async def main(recycle_when_all_floodwait=False):
         if all_in_flood:
             return {"tareas_iniciales": tareas_iniciales, "descargas": 0, "errores": 0, "recycled": True}
 
-    print(f" Iniciando V8 (TELEMETRÍA + SEMÁFORO={MAX_CONCURRENT_DOWNLOADS})...+ {len(BOT_POOL_TOKENS)} Bots")
+    log_timing(f" Iniciando V8 (TELEMETRÍA + SEMÁFORO={MAX_CONCURRENT_DOWNLOADS})...+ {len(BOT_POOL_TOKENS)} Bots")
     queue = asyncio.Queue()
     for t in tareas: queue.put_nowait(t)
 
-    bot_tasks = [asyncio.create_task(worker_bot(queue, token, i+1)) for i, token in enumerate(BOT_POOL_TOKENS)]
+    bot_tasks = []
+    for i, token in enumerate(BOT_POOL_TOKENS):
+        bot_id = i + 1
+        if bot_id in BOTS_BLOQUEADOS:
+            log_timing(f"   [Bot {bot_id}] Saltado (en BOTS_BLOQUEADOS)")
+            continue
+        bot_tasks.append(asyncio.create_task(worker_bot(queue, token, bot_id)))
 
     await queue.join()
     for _ in BOT_POOL_TOKENS: await queue.put(None)
@@ -463,7 +489,7 @@ async def main(recycle_when_all_floodwait=False):
 if __name__ == "__main__":
     try: 
         result = asyncio.run(main())
-        print(result)
+        log_timing(result)
     except KeyboardInterrupt: pass
     finally:
         # Aquí se genera el reporte mágico

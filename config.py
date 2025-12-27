@@ -71,7 +71,7 @@ else:
     ]
 # --- CONTROL DE VELOCIDAD DE BOTS ---
 # 1. Ritmo "Sprint" (Tiempo entre cada foto individual)
-BOT_WAIT_MIN = 3  # Mínimo de segundos a esperar
+BOT_WAIT_MIN = 2  # Mínimo de segundos a esperar
 BOT_WAIT_MAX = 5  # Máximo de segundos a esperar
 
 # 2. Descanso "Boxes" (Para evitar bans largos)

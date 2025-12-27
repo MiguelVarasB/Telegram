@@ -32,8 +32,8 @@ from config import (
 # --- CONFIGURACIÓN ---
 LIMITE = 2000 
 BATCH = 30  
-SLEEP_ENVIO = 5 # Subido un poco para ser más orgánico
-ESPERA_CICLOS = 120
+SLEEP_ENVIO = 20 # Subido un poco para ser más orgánico
+ESPERA_CICLOS = 180
 
 async def check_database_schema():
     async with aiosqlite.connect(DB_PATH) as db:
