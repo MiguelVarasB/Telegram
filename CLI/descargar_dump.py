@@ -59,20 +59,21 @@ FloodWait_forzado = 60*1
 LIMITE_DB=999999
 
 BOTS_BLOQUEADOS=[
-     #  1, #Este nunca usarlo en este script
-      # 2,
+       1, #Este nunca usarlo en este script
+       2,
      #  4,
       # 6,
+      9,
        # 10, 
       # 12,
-    #  13,
+      13,
       # 14,
-      15,
-      16,
-      # 17,
+      #15,
+     # 16,
+       17,
      # 20,
      #  21, 
-     22, 
+     #22, 
      #  23,
     #  24,
      #25,
@@ -80,7 +81,7 @@ BOTS_BLOQUEADOS=[
      # 27,
      #  28,
      #  29,
-      # 30
+      30
 ]
 
 

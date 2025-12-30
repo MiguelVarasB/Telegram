@@ -2,12 +2,14 @@
 MegaTelegram Local - Punto de entrada principal.
 Aplicación modular para gestionar videos de Telegram.
 """
+import logging
+from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from contextlib import asynccontextmanager
 
-from config import ensure_directories, HOST, PORT
+from config import ensure_directories, HOST, PORT, LOG_LEVEL, PYRO_LOG_LEVEL, UVICORN_LOG_LEVEL
 from database import init_db
 from services import start_client, stop_client, warmup_cache
 from routes import (
@@ -20,6 +22,16 @@ from routes import (
     search_router,
     duplicates_router,
 )
+
+# Logging: silenciar trazas ruidosas por defecto (configurable via LOG_LEVEL env)
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.WARNING))
+for noisy_logger in (
+    "pyrogram",
+    "pyrogram.connection",
+    "pyrogram.session",
+    "pyrogram.session.auth",
+):
+    logging.getLogger(noisy_logger).setLevel(getattr(logging, PYRO_LOG_LEVEL, logging.ERROR))
 
 
 @asynccontextmanager
@@ -67,4 +79,4 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=HOST, port=PORT)
+    uvicorn.run(app, host=HOST, port=PORT, log_level=UVICORN_LOG_LEVEL.lower())

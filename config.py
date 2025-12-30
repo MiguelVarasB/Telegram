@@ -18,7 +18,7 @@ SESSION_NAME_SERVER = os.getenv("SESSION_NAME_SERVER", SESSION_NAME)
 API_ID2 = int(os.getenv("API_ID2", ""))
 API_HASH2 = os.getenv("API_HASH2", "")
 SESSION_NAME2 = os.getenv("SESSION_NAME2", "mi_session_free")
-
+LIMIT_PER_PAGE = os.getenv("LIMIT_PER_PAGE", "20")
 CANALES_CON_ACCESO_FREE = [
     -1001713639965,
     -1001560601095,
@@ -112,6 +112,13 @@ DB_PATH = os.path.join(BASE_DIR, "database", "chats.db")
 # --- SERVIDOR ---
 HOST = "127.0.0.2"
 PORT = 8000
+# Nivel de logs configurable via .env (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+# LOG_LEVEL: nivel base de la app/negocio
+# UVICORN_LOG_LEVEL: nivel de logs del servidor HTTP
+# PYRO_LOG_LEVEL: nivel de los loggers de Pyrogram
+LOG_LEVEL = os.getenv("LOG_LEVEL", "WARNING").upper()
+UVICORN_LOG_LEVEL = os.getenv("UVICORN_LOG_LEVEL", LOG_LEVEL).upper()
+PYRO_LOG_LEVEL = os.getenv("PYRO_LOG_LEVEL", "ERROR").upper()
 
 # --- FFMPEG / SPRITES ---
 # Dimensiones solicitadas

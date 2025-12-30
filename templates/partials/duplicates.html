@@ -36,6 +36,7 @@
 
     <div class="dupes-toolbar-right">
         <div id="dupe-summary" class="dupes-summary"></div>
+        <button id="dupe-uncheck-all" class="dupes-btn" type="button" disabled>Desmarcar todos</button>
         <button id="dupe-hide" class="dupes-btn" type="button" disabled>Ocultar duplicados</button>
     </div>
 </div>
@@ -118,6 +119,7 @@
     function renderGroups(data) {
         var wrap = document.getElementById('dupe-groups');
         var summary = document.getElementById('dupe-summary');
+        var uncheckBtn = document.getElementById('dupe-uncheck-all');
         var dumpChannelId = Number(wrap?.getAttribute('data-dump-channel-id') || '') || null;
         if (!wrap) return;
 
@@ -130,8 +132,10 @@
 
         if (!groups.length) {
             wrap.innerHTML = '<div class="dupes-empty">No se encontraron grupos con los criterios seleccionados.</div>';
+            if (uncheckBtn) uncheckBtn.disabled = true;
             return;
         }
+        if (uncheckBtn) uncheckBtn.disabled = false;
 
         var html = '';
 
@@ -231,9 +235,11 @@
         var wrap = document.getElementById('dupe-groups');
         var summary = document.getElementById('dupe-summary');
         var hideBtn = document.getElementById('dupe-hide');
+        var uncheckBtn = document.getElementById('dupe-uncheck-all');
         if (wrap) wrap.innerHTML = '<div class="dupes-empty">Analizando...</div>';
         if (summary) summary.textContent = '';
         if (hideBtn) hideBtn.disabled = true;
+        if (uncheckBtn) uncheckBtn.disabled = true;
 
         var params = new URLSearchParams(getParams());
 
@@ -320,6 +326,16 @@
 
     var hideBtn = document.getElementById('dupe-hide');
     if (hideBtn) hideBtn.addEventListener('click', hideSelected);
+
+    function uncheckAll() {
+        var wrap = document.getElementById('dupe-groups');
+        if (!wrap) return;
+        var checks = wrap.querySelectorAll('input.dupe-item-check');
+        checks.forEach(function (c) { c.checked = false; });
+    }
+
+    var uncheckAllBtn = document.getElementById('dupe-uncheck-all');
+    if (uncheckAllBtn) uncheckAllBtn.addEventListener('click', uncheckAll);
 
     // Auto-ejecutar al entrar
     run();

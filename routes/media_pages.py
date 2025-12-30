@@ -3,13 +3,12 @@ import aiosqlite
 from fastapi import APIRouter, Request, Query
 from fastapi.templating import Jinja2Templates
 
-from config import TEMPLATES_DIR, THUMB_FOLDER, MAIN_TEMPLATE, DB_PATH
+from config import TEMPLATES_DIR, THUMB_FOLDER, MAIN_TEMPLATE, DB_PATH,LIMIT_PER_PAGE
 from utils import convertir_tamano, formatear_miles
 from .media_common import _build_page_links, _format_duration, get_video_info_from_db
 
 router = APIRouter()
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
-
 
 @router.get("/play/{chat_id}/{message_id}")
 async def player_page(request: Request, chat_id: int, message_id: int):
@@ -45,7 +44,10 @@ async def _build_videos_page(
     extra_params: tuple = (),
     view_type: str = "files",
     thumb_filter: str = "con",
+    buscar: str = "",
 ):
+    print("Buscando videos...")   
+   
     offset = (page - 1) * per_page
 
     valid_sorts = {
@@ -67,6 +69,9 @@ async def _build_videos_page(
         where_clause = f"{where_clause} AND has_thumb = 0"
     if extra_where:
         where_clause = f"{where_clause} AND {extra_where}"
+    if buscar:
+        where_clause = f"{where_clause} AND (nombre LIKE ? OR caption LIKE ?)"
+        extra_params = (*extra_params, f"%{buscar}%", f"%{buscar}%")
 
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -154,7 +159,13 @@ async def _build_videos_page(
     total_items_fmt = formatear_miles(total_items)
     total_pages_fmt = formatear_miles(total_pages)
 
-    query_suffix = f"&sort={sort}&direction={direction}"
+    # Mantener todos los filtros en los enlaces de paginación
+    query_suffix = (
+        f"&sort={sort}"
+        f"&direction={direction}"
+        f"&thumb_filter={thumb_filter}"
+        f"&buscar={buscar}"
+    )
 
     return templates.TemplateResponse(
         MAIN_TEMPLATE,
@@ -186,6 +197,7 @@ async def _build_videos_page(
                 "direction": direction,
                 "pages": page_links,
                 "thumb_filter": thumb_filter,
+                "buscar": buscar,
             },
         },
     )
@@ -195,14 +207,14 @@ async def _build_videos_page(
 async def all_videos_with_thumbs_page(
     request: Request,
     page: int = Query(1, ge=1),
-    per_page: int = Query(5, ge=1, le=200),
+    per_page: int = Query(LIMIT_PER_PAGE, ge=1, le=200),
     sort: str = Query("fecha"),
     direction: str = Query("desc"),
     thumb_filter: str = Query("con"),
+    buscar: str = Query(""),
 ):
-
-    print("Buscando videos...")
-    print("thumb_filter", request.query_params.get("thumb_filter"))
+  
+    
    
     return await _build_videos_page(
         request,
@@ -214,6 +226,7 @@ async def all_videos_with_thumbs_page(
         title="Videos",
         view_type="files",
         thumb_filter=thumb_filter,
+        buscar =buscar,
     )
 
 
@@ -221,7 +234,7 @@ async def all_videos_with_thumbs_page(
 async def watch_later_page(
     request: Request,
     page: int = Query(1, ge=1),
-    per_page: int = Query(5, ge=1, le=200),
+    per_page: int = Query(LIMIT_PER_PAGE, ge=1, le=200),
     sort: str = Query("fecha"),
     direction: str = Query("desc"),
 ):

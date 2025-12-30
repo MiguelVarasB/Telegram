@@ -50,7 +50,13 @@ async def toggle_watch_later(video_id: str, value: bool = Body(..., embed=True))
 
 
 @router.get("/api/photo/{file_id}")
-async def get_photo(file_id: str, tipo: str = "video", chat_id: int = None, video_id: str = None, has_thumb: int = 0):
+async def get_photo(
+    file_id: str,
+    tipo: str = "video",
+    chat_id: int = None,
+    video_id: str = None,
+    has_thumb: str = "0",
+):
     """
     Obtiene la miniatura con manejo robusto de FileReferenceExpired e integridad de imagen.
     """
@@ -69,10 +75,16 @@ async def get_photo(file_id: str, tipo: str = "video", chat_id: int = None, vide
         filename = f"{file_id}.webp"
     filepath = os.path.join(target_folder, filename)
 
+    # Normalizamos has_thumb (evita 422 si viene vacío)
+    try:
+        has_thumb_int = int(has_thumb) if str(has_thumb).strip() != "" else 0
+    except Exception:
+        has_thumb_int = 0
+
     # 2. Cache
     if os.path.exists(filepath):
         # Si la miniatura existe pero la DB aún marca has_thumb=0, actualizar bandera.
-        if has_thumb == 0 and video_id:
+        if has_thumb_int == 0 and video_id:
             try:
                 async with aiosqlite.connect(DB_PATH) as db:
                     await db.execute(

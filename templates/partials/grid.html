@@ -4,9 +4,20 @@
        
         {% if pagination is defined and pagination %}
         <div class="sort-controls">
-            <form method="get" action="{{ pagination.base_path }}">
+            <form method="get" action="{{ pagination.base_path }}"  >
                 <input type="hidden" name="page" value="{{ pagination.page }}">
                 <input type="hidden" name="direction" value="{{ pagination.direction }}">
+                <label for="per-page" style="margin-right:6px;">Buscar:</label>
+                <input
+                    type="text"
+                    id="buscar"
+                    name="buscar"
+                    value="{{ pagination.buscar }}"
+                    style="width:200px;"
+                    placeholder="Buscar..."
+                    onkeydown="if (event.key === 'Enter') { event.preventDefault(); this.form.submit(); }"
+                >
+
                 <label for="per-page" style="margin-right:6px;">Videos por página:</label>
                 <input
                     type="number"
