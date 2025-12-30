@@ -3,8 +3,22 @@
     const dom = App.dom || {};
     const state = App.state || {};
     const behaviors = App.behaviors || {};
+    const btnSyncFaltantes = document.getElementById('btn-sync-faltantes');
+    state.batchScan = state.batchScan || { jobId: null, total: 0, done: 0, running: 0 };
 
+    function updateBatchButton(text, disabled) {
+        if (!btnSyncFaltantes) return;
+        btnSyncFaltantes.textContent = text;
+        btnSyncFaltantes.disabled = !!disabled;
+    }
+
+    function formatBatchLabel() {
+        if (!state.batchScan || !state.batchScan.jobId) return 'Sincronizar faltantes';
+        const { done, total, running } = state.batchScan;
+        return `Escaneando (${done}/${total}, ${running} activos)`;
+    }
     // --- Event Listeners Globales ---
+    // Conecta botones, toggles y delegación de clicks a behaviors ya definidos.
     function bindGlobalEvents() {
         if (dom.modalOverlay) {
             dom.modalOverlay.addEventListener('click', function (ev) {
@@ -40,6 +54,10 @@
             });
         }
 
+        if (dom.videoEditSaveBtn) {
+            dom.videoEditSaveBtn.addEventListener('click', behaviors.saveVideoMetadata);
+        }
+
         if (dom.msgToggleBtn && dom.messagesContainer && dom.msgToggleIcon) {
             dom.msgToggleBtn.addEventListener('click', function() {
                 const isHidden = (dom.messagesContainer.style.display === 'none');
@@ -57,6 +75,10 @@
 
         if (dom.toggleDuplicates) {
             dom.toggleDuplicates.addEventListener('change', behaviors.applyDuplicateFilter);
+        }
+
+        if (btnSyncFaltantes) {
+            btnSyncFaltantes.addEventListener('click', behaviors.triggerBatchScan);
         }
 
         // Delegación click para videos
@@ -120,12 +142,15 @@
     }
 
     // --- WebSocket de carpeta: recibir init/refresh y re-renderizar items ---
+    // Escucha mensajes en tiempo real para reemplazar la grilla de la carpeta.
     function setupFolderWS() {
         try {
             const container = document.querySelector('.container[data-folder-id]');
             if (!container) return;
             const folderId = container.getAttribute('data-folder-id');
             if (!folderId) return;
+            // Solo la carpeta especial -1 usa este WS de init
+            if (folderId !== '-1') return;
 
             const loc = window.location;
             const proto = (loc.protocol === 'https:') ? 'wss:' : 'ws:';
@@ -140,6 +165,42 @@
                         if (Array.isArray(payload.items)) {
                             renderFolderItems(payload.items);
                             if (window.refreshLazyChatPhotos) window.refreshLazyChatPhotos();
+                        }
+                    }
+                    if (payload.type === 'batch_scan_start') {
+                        state.batchScan = {
+                            jobId: payload.job_id,
+                            total: payload.total || 0,
+                            done: 0,
+                            running: 0,
+                        };
+                        updateBatchButton(formatBatchLabel(), true);
+                    }
+                    if (payload.type === 'batch_scan_update' && state.batchScan.jobId === payload.job_id) {
+                        state.batchScan.done = payload.done ?? state.batchScan.done;
+                        state.batchScan.running = payload.running ?? state.batchScan.running;
+                        updateBatchButton(formatBatchLabel(), true);
+                    }
+                    if (payload.type === 'batch_scan_done' && state.batchScan.jobId === payload.job_id) {
+                        state.batchScan.done = payload.done ?? state.batchScan.done;
+                        state.batchScan.running = 0;
+                        updateBatchButton('Sincronizar faltantes', false);
+                    }
+                    if (payload.type === 'scan_done' && payload.chat_id) {
+                        // Si el modal actual corresponde al chat, actualiza
+                        if (window.App?.state?.channelModalData?.chatId == payload.chat_id) {
+                            if (typeof window.App?.behaviors?.fillChannelMeta === 'function') {
+                                window.App.behaviors.fillChannelMeta({
+                                    type: window.App.state.channelModalData.chatType,
+                                    username: window.App.state.channelModalData.username,
+                                    indexed_videos: payload.indexed_videos,
+                                    total_videos: payload.total_videos,
+                                    scanned_at: new Date().toISOString(),
+                                    last_message_date: window.App.state.channelModalData.lastMessage,
+                                });
+                            }
+                            const statusEl = document.getElementById('channel-modal-status');
+                            if (statusEl) statusEl.textContent = 'Escaneo finalizado';
                         }
                     }
                 } catch (e) {
@@ -163,6 +224,7 @@
     }
 
     // --- Sincronización de Carpeta (WebSocket) ---
+    // Conecta a ws/folder/:id y, en refresh, refetch de /api/folder para re-renderizar la grilla.
     function setupLiveFolderUpdates() {
         const container = document.querySelector('.container[data-folder-id]');
         if (!container) return;
@@ -173,6 +235,7 @@
         const grid = container.querySelector('.grid-view');
         if (!grid) return;
 
+        // Escapado simple para valores renderizados en HTML
         function escapeHtml(str) {
             if (!str) return '';
             return String(str)
@@ -187,7 +250,18 @@
             if (!Array.isArray(items)) return;
             let html = '';
 
+            // Construye cards de chat o video según el tipo recibido
             items.forEach(function (item) {
+               
+                const folderId = item.folder_id || '';
+                const chatId = item.chat_id || '';
+                const faltantes = item.faltantes || 0;
+                const indexed = item.indexed_videos || '0';
+                const total = item.total_videos || '0';
+                const scannedAt = item.scanned_at || '';
+                const chatType = item.chat_type || '';
+                const lastMsg = item.last_message_date || '';
+                const username = item.username || '';
                 const name = escapeHtml(item.name || '');
                 const count = escapeHtml(item.count || '');
                 const link = item.link || '#';
@@ -234,7 +308,13 @@
                         + '<div class="file-info">' + count + '</div>'
                         + '</a>';
                 } else {
-                    html += '<a href="' + link + '" class="file-item" data-item-type="' + escapeHtml(type) + '">';
+                    html += '<a href="' + link + '" class="file-item"'
+                        + ' data-item-type="' + escapeHtml(type) + '"'
+                        + ' data-chat-id="' + escapeHtml(chatId) + '"'
+                        + ' data-faltantes="' + escapeHtml(faltantes) + '"'
+                        + ' data-indexed="' + escapeHtml(indexed) + '"'
+                        + ' data-total="' + escapeHtml(total) + '"'
+                        + ' data-scanned-at="' + escapeHtml(scannedAt) + '">';
 
                     if (telegramLink) {
                         html += '<span class="btn-open-telegram" data-telegram-link="' + escapeHtml(telegramLink) + '" title="Abrir en Telegram">'
@@ -250,12 +330,39 @@
                     }
                     html += '</div>'
                         + '<div class="file-name" title="' + name + '">' + name + '</div>'
-                        + '<div class="file-info">' + count + '</div>'
-                        + '</a>';
+                        + '<div class="file-info">' + count + '</div>';
+
+                    if (folderId) {
+                        html += '<button type="button"'
+                            + ' class="btn-sync open-channel-modal"'
+                            + ' onclick="return window.openChannelModalFromButton && window.openChannelModalFromButton(this);"'
+                            + ' data-chat-id="' + escapeHtml(chatId) + '"'
+                            + ' data-chat-name="' + name + '"'
+                            + ' data-indexed="' + escapeHtml(indexed) + '"'
+                            + ' data-total="' + escapeHtml(total) + '"'
+                            + ' data-scanned-at="' + escapeHtml(scannedAt) + '"'
+                            + ' data-chat-type="' + escapeHtml(chatType) + '"'
+                            + ' data-last-message="' + escapeHtml(lastMsg) + '"'
+                            + ' data-username="' + escapeHtml(username) + '"'
+                            + ' data-telegram-link="' + escapeHtml(telegramLink) + '">'
+                            + 'Info / Indexar'
+                            + '</button>';
+                    }
+                    if(folderId==-1){
+                        btnSyncFaltantes.style.display='';
+                    }
+
+                    html += '</a>';
                 }
             });
 
             grid.innerHTML = html;
+            if (items.some((it) => it.folder_id)) {
+                grid.querySelectorAll('.btn-sync.open-channel-modal').forEach((btn) => {
+                    btn.style.display = '';
+                });
+            }
+            if (window.refreshLazyChatPhotos) window.refreshLazyChatPhotos();
             behaviors.applyHiddenStateToAll?.();
             behaviors.applyDuplicateFilter?.();
             behaviors.applyWatchLaterStateToAll?.();
@@ -263,8 +370,14 @@
             behaviors.setupHoverPreviews?.();
         }
 
-        // Exponer para reutilizar desde otros listeners (WS init/refresh)
+        // Exponer renderItems globalmente para que setupFolderWS pueda reutilizarlo (carpeta -1)
         window.renderItems = renderItems;
+
+        // Para la carpeta especial -1 evitamos abrir este WS (lo maneja setupFolderWS)
+        // pero dejamos renderItems disponible.
+        if (folderId === '-1') {
+            return;
+        }
 
         async function fetchAndRender() {
             try {
@@ -282,7 +395,12 @@
 
         const loc = window.location;
         const proto = (loc.protocol === 'https:') ? 'wss:' : 'ws:';
-        const wsUrl = proto + '//' + loc.host + '/ws/folder/' + encodeURIComponent(folderId);
+        const limitInput = document.getElementById('search-limit');
+        const urlParams = new URLSearchParams(loc.search);
+        const limitFromUrl = urlParams.get('limite') || urlParams.get('limit');
+        const limitValue = (limitInput && limitInput.value) || limitFromUrl || '';
+        const wsQuery = limitValue ? ('?limite=' + encodeURIComponent(limitValue)) : '';
+        const wsUrl = proto + '//' + loc.host + '/ws/folder/' + encodeURIComponent(folderId) + wsQuery;
 
         let ws;
         try {
@@ -292,6 +410,7 @@
             return;
         }
 
+        // Cada mensaje "refresh" dispara un refetch de la carpeta
         ws.onmessage = function (event) {
             try {
                 const payload = JSON.parse(event.data);
@@ -310,8 +429,62 @@
                 }
             } catch (e) {}
         });
+
+        // Primera carga inmediata vía API
+        fetchAndRender();
     }
 
+    // --- Trigger batch scan desde el front (usa el nuevo endpoint) ---
+    behaviors.triggerBatchScan = async function triggerBatchScan() {
+        const container = document.querySelector('.container[data-folder-id]');
+        const folderId = container?.getAttribute('data-folder-id') || null;
+        const cards = Array.from(document.querySelectorAll('.file-item[data-chat-id]'))
+            .filter((el) => Number(el.dataset.faltantes || 0) > 0)
+            // Orden: menos videos totales primero (fallback a faltantes, luego chat_id)
+            .sort((a, b) => {
+                const ta = Number(a.dataset.total || 0);
+                const tb = Number(b.dataset.total || 0);
+                if (ta !== tb) return ta - tb;
+                const fa = Number(a.dataset.faltantes || 0);
+                const fb = Number(b.dataset.faltantes || 0);
+                if (fa !== fb) return fa - fb;
+                return Number(a.dataset.chatId || 0) - Number(b.dataset.chatId || 0);
+            });
+        if (!btnSyncFaltantes) return;
+        if (!cards.length) {
+            updateBatchButton('Nada que sincronizar', true);
+            setTimeout(() => updateBatchButton('Sincronizar faltantes', false), 1500);
+            return;
+        }
+        const chatIds = cards.map((el) => Number(el.dataset.chatId)).filter((n) => Number.isFinite(n));
+        updateBatchButton(`Enviando (${chatIds.length})...`, true);
+        try {
+            const res = await fetch('/api/folder/scan-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_ids: chatIds,
+                    folder_id: folderId ? Number(folderId) : null,
+                }),
+            });
+            if (!res.ok) throw new Error('scan-batch failed');
+            const data = await res.json();
+            state.batchScan = {
+                jobId: data.job_id,
+                total: data.total || chatIds.length,
+                done: 0,
+                running: 0,
+            };
+            updateBatchButton(formatBatchLabel(), true);
+        } catch (e) {
+            console.error('Error batch scan', e);
+            updateBatchButton('Error al iniciar', true);
+            setTimeout(() => updateBatchButton('Sincronizar faltantes', false), 2000);
+        }
+    };
+
+    // --- Inicialización principal ---
+    // Aplica estados iniciales, listeners y WS al cargar la página.
     function init() {
         behaviors.setupHoverPreviews?.();
         setupLiveFolderUpdates();
@@ -340,6 +513,7 @@
                 }
             });
         }
+        updateBatchButton('Sincronizar faltantes', false);
     }
 
     init();

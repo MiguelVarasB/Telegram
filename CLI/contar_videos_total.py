@@ -12,7 +12,8 @@ from database import init_db, db_upsert_chat_basic, db_upsert_chat_video_count
 
 async def contar_videos_en_todos_mis_chats():
     await init_db()
-    client = get_client()
+    client = get_client(clone_for_cli=True)
+
     if not client.is_connected:
         await client.start()
 

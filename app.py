@@ -32,7 +32,9 @@ async def lifespan(app: FastAPI):
     # Es crucial usar 'await' aquí porque cambiamos init_db a async
     await init_db() 
     
-    await start_client()
+    # Usamos una sesión de Telegram separada para el servidor para evitar locks
+    await start_client(use_server_session=True)
+    
     await warmup_cache(limit=100)
     
     yield

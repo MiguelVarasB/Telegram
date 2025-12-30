@@ -2,7 +2,6 @@ import os
 import asyncio
 import aiosqlite
 import sys
-from pyrogram import Client
 from pyrogram.errors import FloodWait
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,11 +16,13 @@ from config import (
     FOLDER_SESSIONS,
     CANALES_CON_ACCESO_FREE,
 )
-
+from services.telegram_client import get_client
+from utils import save_image_as_webp, log_timing
 # --- CONFIGURACIÓN ---
 LIMITE = 1000  # Cantidad de videos a procesar en esta vuelta
 BATCH =   30  # Tamaño del paquete de reenvío (No subir de 20)
 SLEEP_ENVIO=2
+
 async def check_database_schema():
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("PRAGMA table_info(videos_telegram)") as cursor:
@@ -41,7 +42,7 @@ async def marcar_fallidos(video_ids, razon):
             tuple(video_ids),
         )
         await db.commit()
-    print(f"\n🗑️ Marcados {len(video_ids)} registros como dump_fail=1. Razón: {razon}")
+    log_timing(f"\n🗑️ Marcados {len(video_ids)} registros como dump_fail=1. Razón: {razon}")
 
 async def marcar_chat_fallido(chat_id, razon):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -58,20 +59,17 @@ async def marcar_chat_fallido(chat_id, razon):
             (chat_id,),
         )
         await db.commit()
-    print(f"\n🗑️ Marcado chat {chat_id} como NO reenviable (dump_fail=1). Razón: {razon}")
+    log_timing(f"\n🗑️ Marcado chat {chat_id} como NO reenviable (dump_fail=1). Razón: {razon}")
 
 async def main():
     if not CACHE_DUMP_VIDEOS_CHANNEL_ID:
-        print("❌ ERROR: Configura el CACHE_DUMP_VIDEOS_CHANNEL_ID en config.py")
+        log_timing("❌ ERROR: Configura el CACHE_DUMP_VIDEOS_CHANNEL_ID en config.py")
         return {
             "pendientes": 0,
             "reenviados": 0,
         }
 
-    print(f"🚀 Iniciando reenvío de hasta {LIMITE} videos al canal {CACHE_DUMP_VIDEOS_CHANNEL_ID}...")
-
-    # Aseguramos carpeta de sesiones
-    os.makedirs(FOLDER_SESSIONS, exist_ok=True)
+    log_timing(f"🚀 Iniciando reenvío de hasta {LIMITE} videos al canal {CACHE_DUMP_VIDEOS_CHANNEL_ID}...")
 
     await check_database_schema()
 
@@ -101,19 +99,18 @@ async def main():
             pendientes = await cursor.fetchall()
 
     if not pendientes:
-        print("✅ No hay videos pendientes.")
+        log_timing("✅ No hay videos pendientes.")
         return {
             "pendientes": 0,
             "reenviados": 0,
         }
 
-    print(f"📦 Encontrados {len(pendientes)} videos. Conectando Userbot...")
+    log_timing(f"📦 Encontrados {len(pendientes)} videos. Conectando Userbot...")
 
-    # 2. Conectar Userbot (sesión guardada en la carpeta sessions)
-    session_path = os.path.join(FOLDER_SESSIONS, SESSION_NAME)
-    app = Client(session_path, api_id=API_ID, api_hash=API_HASH)
-
-    await app.start()
+    # 2. Conectar Userbot usando un clon de sesión para evitar locks
+    app = get_client(clone_for_cli=True)
+    if not app.is_connected:
+        await app.start()
 
     # 3. Agrupar por chat de origen (Telegram requiere reenviar por chat)
     lotes = {}
@@ -159,27 +156,27 @@ async def main():
                         await db.commit()
                     
                     total_ok += len(nuevos_msgs)
-                    print("✅")
+                    log_timing("✅")
                     await asyncio.sleep(SLEEP_ENVIO) # Pausa de seguridad
 
                 except FloodWait as e:
-                    print(f"\n⏳ FloodWait: Esperando {e.value} segundos...")
+                    log_timing(f"\n⏳ FloodWait: Esperando {e.value} segundos...")
                     await asyncio.sleep(e.value)
                 except Exception as e:
                     err_id = getattr(e, "ID", "")
                     err_txt = str(e)
                     if err_id == "CHAT_FORWARDS_RESTRICTED" or "CHAT_FORWARDS_RESTRICTED" in err_txt:
-                        print(f"\n❌ Error: {e}")
+                        log_timing(f"\n❌ Error: {e}")
                         await marcar_chat_fallido(chat_origin, "CHAT_FORWARDS_RESTRICTED")
                         chat_bloqueado = True
                         break
-                    print(f"\n❌ Error: {e}")
+                    log_timing(f"\n❌ Error: {e}")
 
             if chat_bloqueado:
                 continue
     finally:
         await app.stop()
-    print(f"\n🏁 FIN. Total reenviados: {total_ok}")
+    log_timing(f"\n🏁 FIN. Total reenviados: {total_ok}")
 
     return {
         "pendientes": len(pendientes),

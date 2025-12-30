@@ -167,6 +167,53 @@
         border-radius: 8px;
         padding: 6px 8px;
     }
+    .grid-view {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 20px;
+    }
+    .file-item {
+        background: #252525;
+        border-radius: 8px;
+        padding: 10px;
+        text-decoration: none;
+        color: inherit;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        cursor: pointer;
+        position: relative;
+        overflow: visible;
+        transition: background 0.2s ease,
+                    transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                    box-shadow 0.2s ease;
+    }
+    .file-item:hover {
+        background-color: var(--item-hover);
+        transform: translateY(-8px) scale(1.12);
+        box-shadow: 0 16px 45px rgba(0,0,0,0.8);
+        z-index: 10;
+    }
+    .file-item:active {
+        transform: translateY(-1px) scale(0.99);
+    }
+    .file-item.is-complete {
+        border: 1px solid #2f9b4c;
+        box-shadow: 0 0 18px rgba(47, 155, 76, 0.25);
+        background: linear-gradient(135deg, #1f3323 0%, #18251b 100%);
+        position: relative;
+    }
+    .file-item.is-complete::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 8px;
+        background: linear-gradient(135deg, rgba(47, 155, 76, 0.08), rgba(47, 155, 76, 0.02));
+        pointer-events: none;
+    }
+    .file-item.is-complete .file-info {
+        color: #8ceca3;
+    }
     .sort-controls label {
         font-size: 0.75rem;
         color: var(--text-muted);
@@ -244,36 +291,6 @@
         border-color: var(--file-blue);
         pointer-events: none;
         cursor: default;
-    }
-    .grid-view {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-        gap: 20px;
-    }
-    .file-item {
-        background: #252525;
-        border-radius: 8px;
-        padding: 10px;
-        text-decoration: none;
-        color: inherit;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        cursor: pointer;
-        position: relative;
-        overflow: visible;
-        transition: background 0.2s ease,
-                    transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                    box-shadow 0.2s ease;
-    }
-    .file-item:hover {
-        background-color: var(--item-hover);
-        transform: translateY(-8px) scale(1.12);
-        box-shadow: 0 16px 45px rgba(0,0,0,0.8);
-        z-index: 10;
-    }
-    .file-item:active {
-        transform: translateY(-1px) scale(0.99);
     }
     .icon-box {
         width: 100%;
@@ -361,14 +378,14 @@
         z-index: 2;
     }
     .folder-icon {
-        font-size: 54px;
+        font-size: 130px;
     }
     .folder-overlay {
         position: absolute;
-        bottom: 10px;
-        right: 12px;
-        width: 32px;
-        height: 32px;
+       /* bottom: 10px;
+       /* right: 12px; */
+       width: 70px; 
+        height: 70px;
         border-radius: 50%;
         border: 2px solid #181818;
         object-fit: cover;
@@ -515,22 +532,16 @@
         border-radius: 6px;
         border: none;
         background: var(--accent);
+        color: var(--text-main);
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
 
-        .btn-stats {
-            padding: 8px 12px;
-            border-radius: 6px;
-            border: 1px solid #444;
-            background: #202020;
-            color: var(--text-main);
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-        }
-        .btn-stats:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-            background: #2a2a2a;
-        }
+    .btn-stats {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid #444;
         background: #202020;
         color: var(--text-main);
         font-weight: 600;
@@ -543,6 +554,7 @@
         background: #2a2a2a;
     }
 
+    /* --- Modal de estadísticas --- */
     .stats-modal-overlay {
         position: fixed;
         inset: 0;
@@ -581,7 +593,6 @@
     .stats-modal-body {
         color: var(--text-main);
     }
-
     .stats-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -656,6 +667,7 @@
         font-size: 0.9rem;
         flex-shrink: 0;
     }
+
 
     .dupes-toolbar {
         display: flex;
@@ -846,5 +858,51 @@
         text-overflow: ellipsis;
     }
 
+
     /* -------------------------------- */
+button.btn-card-watch-later.btn-watchlater-overlay {
+    position: absolute;
+    left: 1px;
+    top: 1px;
+}
+
+
+    /* --- Modal de canal (jQuery overlay) --- */
+    .channel-modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.85);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        z-index: 2050;
+    }
+    .channel-modal {
+        width: 100%;
+        max-width: 520px;
+        background: #181818;
+        border: 1px solid #333;
+        border-radius: 10px;
+        box-shadow: 0 20px 70px rgba(0,0,0,0.7);
+        padding: 18px;
+        position: relative;
+    }
+    .channel-modal .modal-close {
+        position: absolute;
+        top: 12px;
+        right: 16px;
+        color: #fff;
+        background: transparent;
+        border: none;
+        font-size: 32px;
+        cursor: pointer;
+    }
+    .channel-modal .actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 14px;
+    }
+
+
 </style>

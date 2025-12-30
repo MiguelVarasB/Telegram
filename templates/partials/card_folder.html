@@ -1,4 +1,4 @@
-<a href="{{ item.link }}" class="file-item" data-item-type="{{ item.type }}">
+<a href="{{ item.link }}" class="file-item {% if item.is_complete %}is-complete{% endif %}" data-item-type="{{ item.type }}">
     <div class="icon-box folder-box">
         <i class="fas fa-folder folder-chat folder-icon"></i>
         {% if item.photo_id %}
@@ -19,6 +19,7 @@
     {% endif %}
 
     <button type="button"
+           style="display:none"
             class="btn-sync open-channel-modal"
             onclick="return window.openChannelModalFromButton && window.openChannelModalFromButton(this);"
             data-chat-id="{{ item.chat_id }}"

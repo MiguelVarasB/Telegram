@@ -1,4 +1,4 @@
-<div id="channel-modal-overlay" class="channel-modal-overlay">
+<div id="channel-modal-overlay" class="channel-modal-overlay" style="display:none;">
     <div class="channel-modal">
         <button type="button" class="modal-close" id="channel-modal-close" aria-label="Cerrar">&times;</button>
         <h3 id="channel-modal-title">Canal</h3>
@@ -24,6 +24,10 @@
     window.__channelModalInitialized = true;
     const overlay = document.getElementById('channel-modal-overlay');
     const closeBtn = document.getElementById('channel-modal-close');
+    const $overlay = window.jQuery ? window.jQuery('#channel-modal-overlay') : null;
+    const $closeBtn = window.jQuery ? window.jQuery('#channel-modal-close') : null;
+    const $openBtn = window.jQuery ? window.jQuery('#channel-modal-open') : null;
+    const $statusEl = window.jQuery ? window.jQuery('#channel-modal-status') : null;
     const titleEl = document.getElementById('channel-modal-title');
     const metaEl = document.getElementById('channel-modal-meta');
     const statusEl = document.getElementById('channel-modal-status');
@@ -32,11 +36,13 @@
     let chatId = null;
     let chatHref = null;
     function fillMeta(data) {
+         console.log(data);
         if (!metaEl) return;
         const parts = [];
         if (data.type) parts.push(`Tipo: ${data.type}`);
         if (data.username) parts.push(`Usuario: @${data.username}`);
         parts.push(`Indexados / Totales: ${(data.indexed_videos||0)} / ${(data.total_videos||0)}`);
+    
         if (data.scanned_at) parts.push(`Último escaneo: ${data.scanned_at}`);
         if (data.last_message_date) parts.push(`Último mensaje: ${data.last_message_date}`);
         metaEl.innerHTML = parts.map(t => `<div>${t}</div>`).join('');
@@ -59,13 +65,20 @@
         if (titleEl) titleEl.textContent = btn.dataset.chatName || 'Canal';
         fillMeta({
             type: btn.dataset.chatType,
+            username: btn.dataset.username,
             indexed_videos: btn.dataset.indexed,
             total_videos: btn.dataset.total,
             scanned_at: btn.dataset.scannedAt,
             last_message_date: btn.dataset.lastMessage,
         });
         if (statusEl) statusEl.textContent = 'Cargando info...';
-        overlay?.classList.add('is-open');
+        if ($overlay) {
+            $overlay.stop(true, true).css('display', 'flex').hide().fadeIn(150);
+        } else {
+            overlay?.classList.add('is-open');
+            overlay?.classList.remove('is-closed');
+            if (overlay) overlay.style.display = 'flex';
+        }
         fetchInfo(chatId);
     }
     document.addEventListener('click', function(ev) {
@@ -75,26 +88,33 @@
         ev.stopPropagation();
         openModal(btn);
     });
-    closeBtn?.addEventListener('click', function() {
-        overlay?.classList.remove('is-open');
-    });
-    overlay?.addEventListener('click', function(ev) {
-        if (ev.target === overlay) overlay.classList.remove('is-open');
-    });
-    scanBtn?.addEventListener('click', async function() {
-        if (!chatId) return;
-        scanBtn.disabled = true;
-        if (statusEl) statusEl.textContent = 'Lanzando escaneo...';
-        try {
-            const res = await fetch(`/api/channel/${encodeURIComponent(chatId)}/scan`, { method: 'POST' });
-            if (!res.ok) throw new Error();
-            if (statusEl) statusEl.textContent = 'Escaneo iniciado en segundo plano';
-        } catch (e) {
-            if (statusEl) statusEl.textContent = 'Error al iniciar escaneo';
-        } finally {
-            scanBtn.disabled = false;
+
+    function closeModal() {
+        if ($overlay) {
+            $overlay.stop(true, true).fadeOut(150, function() {
+                $overlay.css('display', 'none');
+                if ($statusEl && $statusEl.length) $statusEl.text('');
+            });
+        } else {
+            overlay?.classList.remove('is-open');
+            overlay?.classList.add('is-closed');
+            if (overlay) overlay.style.display = 'none';
+            if (statusEl) statusEl.textContent = '';
         }
-    });
+    }
+
+    if ($closeBtn) $closeBtn.on('click', closeModal);
+    else closeBtn?.addEventListener('click', closeModal);
+
+    if ($overlay) {
+        $overlay.on('click', function(ev) {
+            if (ev.target === this) closeModal();
+        });
+    } else {
+        overlay?.addEventListener('click', function(ev) {
+            if (ev.target === overlay) closeModal();
+        });
+    }
     openBtn?.addEventListener('click', function() {
         if (chatHref) window.location.href = chatHref;
         else if (chatId) window.location.href = `/channel/${encodeURIComponent(chatId)}`;

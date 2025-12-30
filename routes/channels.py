@@ -5,6 +5,7 @@ Versión Async para DB (aiosqlite) con Background Tasks para no bloquear la UI.
 import os
 import json
 import asyncio
+import datetime
 import aiosqlite  # Necesario para leer rápido la BD local
 from fastapi import APIRouter, Request, BackgroundTasks, Query, HTTPException
 from fastapi.templating import Jinja2Templates
@@ -15,10 +16,10 @@ from config import TEMPLATES_DIR, JSON_FOLDER, MAIN_TEMPLATE, DB_PATH, SMART_CAC
 from services import get_client, prefetch_channel_videos_to_ram, background_thumb_downloader
 from database import (
     db_upsert_video, db_add_video_file_id, 
-    db_get_chat, db_get_chat_folders,
-    db_upsert_video_message, db_count_videos_by_chat
+    db_get_chat, db_get_chat_folders, db_get_chat_scan_meta,
+    db_upsert_video_message, db_count_videos_by_chat, db_upsert_chat_video_count
 )
-from utils import convertir_tamano, formatear_miles
+from utils import convertir_tamano, formatear_miles, ws_manager
 
 router = APIRouter()
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -26,11 +27,39 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 def _format_duration(seconds: int) -> str:
     if not seconds:
         return ""
+
     mins, secs = divmod(int(seconds), 60)
     hours, mins = divmod(mins, 60)
     if hours:
         return f"{hours}:{mins:02d}:{secs:02d}"
     return f"{mins}:{secs:02d}"
+
+async def _get_telegram_meta(chat_id: int) -> dict:
+    """
+    Recupera metadatos directos desde Telegram sin descargar contenido
+    (solo get_chat, no indexa ni baja medios).
+    """
+    meta: dict = {}
+    try:
+        client = get_client()
+        tg_chat = await client.get_chat(chat_id)
+        meta = {
+            "title": getattr(tg_chat, "title", None),
+            "username": getattr(tg_chat, "username", None),
+            "type": str(getattr(tg_chat, "type", None)),
+            "description": getattr(tg_chat, "description", None),
+            "members_count": getattr(tg_chat, "members_count", None),
+            "dc_id": getattr(tg_chat, "dc_id", None),
+            "is_verified": getattr(tg_chat, "is_verified", None),
+            "is_scam": getattr(tg_chat, "is_scam", None),
+            "is_fake": getattr(tg_chat, "is_fake", None),
+            "is_restricted": getattr(tg_chat, "is_restricted", None),
+            "restriction_reason": getattr(tg_chat, "restriction_reason", None),
+        }
+    except Exception:
+        # Si falla la conexión con Telegram seguimos con los datos locales
+        meta = {}
+    return meta
 
 @router.get("/api/channel/{chat_id}/info")
 async def api_channel_info(chat_id: int):
@@ -40,25 +69,89 @@ async def api_channel_info(chat_id: int):
         raise HTTPException(status_code=404, detail="Chat no encontrado")
 
     indexed = await db_count_videos_by_chat(chat_id)
-    # Por ahora usamos el mismo conteo como total si no hay otra fuente
-    total = indexed
+    scan_meta = await db_get_chat_scan_meta(chat_id) or {}
+    total = scan_meta.get("videos_count") if scan_meta.get("videos_count") is not None else indexed
+    scanned_at = scan_meta.get("scanned_at") or chat.get("last_message_date")
+
+    telegram_meta = await _get_telegram_meta(chat_id)
+    name = chat.get("name") or telegram_meta.get("title")
+    username = chat.get("username") or telegram_meta.get("username")
+    chat_type = chat.get("type") or telegram_meta.get("type")
 
     return {
         "chat_id": chat_id,
-        "name": chat.get("name"),
-        "type": chat.get("type"),
-        "username": chat.get("username"),
+        "name": name,
+        "type": chat_type,
+        "username": username,
         "indexed_videos": indexed,
         "total_videos": total,
-        "scanned_at": chat.get("last_message_date"),
+        "scanned_at": scanned_at,
         "last_message_date": chat.get("last_message_date"),
+        "duplicados": scan_meta.get("duplicados"),
+        "description": telegram_meta.get("description"),
+        "members_count": telegram_meta.get("members_count"),
+        "dc_id": telegram_meta.get("dc_id"),
+        "is_verified": telegram_meta.get("is_verified"),
+        "is_scam": telegram_meta.get("is_scam"),
+        "is_fake": telegram_meta.get("is_fake"),
+        "is_restricted": telegram_meta.get("is_restricted"),
+        "restriction_reason": telegram_meta.get("restriction_reason"),
     }
 
 @router.post("/api/channel/{chat_id}/scan")
 async def api_channel_scan(chat_id: int, background_tasks: BackgroundTasks):
-    """Lanza el escaneo de videos faltantes en segundo plano."""
-    background_tasks.add_task(scan_channel_background, chat_id)
+    """Lanza el escaneo solo para indexar metadatos (sin bots/thumbs)."""
+    background_tasks.add_task(scan_channel_background, chat_id, False)
     return JSONResponse({"status": "scheduled"})
+
+@router.get("/api/channel/{chat_id}/videos")
+async def api_channel_videos(
+    chat_id: int,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(100, ge=1, le=200),
+    sort: str = Query("fecha"),
+    direction: str = Query("desc"),
+):
+    """
+    Devuelve videos ya indexados de un canal/chat (solo lectura, sin disparar indexación).
+    """
+    videos_locales = await get_local_videos(chat_id)
+
+    valid_sorts = {
+        "fecha": ("date", True),
+        "nombre": ("name", False),
+        "duracion": ("duration_seconds", False),
+    }
+    sort_field, _ = valid_sorts.get(sort, ("date", True))
+    direction = direction.lower()
+    reverse = direction != "asc"
+
+    if sort_field == "date":
+        videos_locales = sorted(videos_locales, key=lambda x: x.get("date") or "", reverse=reverse)
+    else:
+        videos_locales = sorted(videos_locales, key=lambda x: x.get(sort_field) or 0, reverse=reverse)
+
+    total_items = len(videos_locales)
+    per_page = max(1, min(200, per_page))
+    total_pages = max(1, (total_items + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    offset = (page - 1) * per_page
+    items_paged = videos_locales[offset : offset + per_page]
+
+    pagination = {
+        "page": page,
+        "per_page": per_page,
+        "total_items": total_items,
+        "total_pages": total_pages,
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
+        "prev_page": max(1, page - 1),
+        "next_page": min(total_pages, page + 1),
+        "sort": sort,
+        "direction": direction,
+    }
+
+    return {"items": items_paged, "pagination": pagination}
 
 def _build_page_links(page: int, total_pages: int):
     """
@@ -171,7 +264,7 @@ async def get_local_videos(chat_id: int):
         print(f"⚠️ Error leyendo cache local: {e}")
     return videos
 
-async def scan_channel_background(chat_id: int):
+async def scan_channel_background(chat_id: int, run_thumb_worker: bool = True):
     """
     Tarea pesada que corre en segundo plano:
     1. Escanea historial de Telegram.
@@ -183,8 +276,12 @@ async def scan_channel_background(chat_id: int):
     client = get_client()
     raw_dump = []
     count_new = 0
+    duplicates_count = 0
+    seen_files: set[str] = set()
     stop_event = asyncio.Event()
-    thumb_task = asyncio.create_task(_thumb_poller(stop_event))
+    thumb_task = None
+    if run_thumb_worker:
+        thumb_task = asyncio.create_task(_thumb_poller(stop_event))
 
     try:
         # Escaneo asíncrono de historial
@@ -193,6 +290,12 @@ async def scan_channel_background(chat_id: int):
                 v = m.video
                 fn = v.file_name or f"Video {m.id}"
                 msg_dict = json.loads(str(m))
+
+                # Duplicados: si el file_unique_id ya se vio, contamos duplicado y seguimos upsert
+                if v.file_unique_id in seen_files:
+                    duplicates_count += 1
+                else:
+                    seen_files.add(v.file_unique_id)
 
                 # Upsert Video
                 video_data = {
@@ -254,21 +357,38 @@ async def scan_channel_background(chat_id: int):
 
         print(f"✅ [Background] Escaneo finalizado para {chat_id}. {count_new} videos procesados.")
         
-        # Al terminar el escaneo, disparamos el prefetch (SmartCache)
-        if SMART_CACHE_ENABLED and count_new > 0:
-            await prefetch_channel_videos_to_ram(chat_id)
+        try:
+            indexed_final = await db_count_videos_by_chat(chat_id)
+            scanned_at = datetime.datetime.utcnow().isoformat()
+            await db_upsert_chat_video_count(
+                chat_id,
+                indexed_final,          # videos_count
+                scanned_at,
+                duplicates_count,
+                indexados=indexed_final
+            )
+            await ws_manager.broadcast_event({
+                "type": "scan_done",
+                "chat_id": chat_id,
+                "indexed_videos": indexed_final,
+                "total_videos": indexed_final,
+                "duplicados": duplicates_count,
+            })
+        except Exception:
+            pass
 
     except Exception as e:
         print(f"❌ [Background] Error escaneando {chat_id}: {e}")
     finally:
         stop_event.set()
-        await thumb_task
+        if thumb_task:
+            await thumb_task
 
 @router.get("/channel/{chat_id}")
 async def ver_canal(
     request: Request,
     chat_id: int,
-    background_tasks: BackgroundTasks, # <--- Inyección de dependencia vital
+    background_tasks: BackgroundTasks, 
     name: str | None = None,
     folder_id: int | None = None,
     folder_name: str | None = None,

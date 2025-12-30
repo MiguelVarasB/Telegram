@@ -37,7 +37,8 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS chat_video_counts (
                 chat_id INTEGER PRIMARY KEY,
                 videos_count INTEGER DEFAULT 0,
-                scanned_at TEXT
+                scanned_at TEXT,
+                duplicados INTEGER DEFAULT 0
             )
         """)
         
@@ -59,6 +60,16 @@ async def init_db():
         if "last_message_date" not in columns:
             print(" Migrando BD: Agregando columna last_message_date...")
             await db.execute("ALTER TABLE chats ADD COLUMN last_message_date TEXT")
+
+        # Migración al vuelo: columnas en chat_video_counts
+        async with db.execute("PRAGMA table_info(chat_video_counts)") as cursor:
+            cvc_cols = [row[1] async for row in cursor]
+        if "duplicados" not in cvc_cols:
+            print(" Migrando BD: Agregando columna duplicados a chat_video_counts...")
+            await db.execute("ALTER TABLE chat_video_counts ADD COLUMN duplicados INTEGER DEFAULT 0")
+        if "indexados" not in cvc_cols:
+            print(" Migrando BD: Agregando columna indexados a chat_video_counts...")
+            await db.execute("ALTER TABLE chat_video_counts ADD COLUMN indexados INTEGER DEFAULT 0")
 
         # Asegurar columna watch_later en videos_telegram si existe la tabla
         try:

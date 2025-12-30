@@ -4,12 +4,14 @@
     const helpers = App.helpers || {};
     const behaviors = App.behaviors = App.behaviors || {};
 
+    // Cierra el modal de estadísticas y limpia contenido
     function closeStatsModal() {
         if (!dom.statsOverlay) return;
         dom.statsOverlay.classList.remove('is-open');
         if (dom.statsContent) dom.statsContent.innerHTML = '';
     }
 
+    // Obtiene estadísticas desde /api/stats y renderiza tarjetas/listas
     async function loadStats() {
         if (!dom.statsContent) return;
         dom.statsContent.textContent = 'Cargando estadísticas...';
@@ -140,6 +142,7 @@
         }
     }
 
+    // Abre modal de estadísticas y dispara la carga
     function openStatsModal() {
         if (!dom.statsOverlay) return;
         dom.statsOverlay.classList.add('is-open');

@@ -3,28 +3,80 @@ Cliente de Telegram (Pyrogram) singleton con reconexión automática.
 """
 import asyncio
 import os
+import shutil
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, SessionRevoked
-from config import API_ID, API_HASH, SESSION_NAME, FOLDER_SESSIONS
+from config import API_ID, API_HASH, SESSION_NAME, SESSION_NAME_SERVER, FOLDER_SESSIONS
 
 # Cliente en modo pasivo (no_updates=True) para evitar errores de PeerInvalid
-_client: Client | None = None
+# Permitimos múltiples instancias (p. ej., un clon para CLI) cacheadas por ruta.
+_clients: dict[str, Client] = {}
 _reconnect_lock = asyncio.Lock()
 
 
-def get_client() -> Client:
-    """Retorna el cliente singleton de Pyrogram."""
-    global _client
-    if _client is None:
-        os.makedirs(FOLDER_SESSIONS, exist_ok=True)
-        session_path = os.path.join(FOLDER_SESSIONS, SESSION_NAME)
-        _client = Client(session_path, api_id=API_ID, api_hash=API_HASH, no_updates=True)
-    return _client
+def _copy_session_files(base_name: str, clone_name: str):
+    """Clona los archivos .session para poder abrir la misma cuenta sin lock."""
+    os.makedirs(FOLDER_SESSIONS, exist_ok=True)
+    base_path = os.path.join(FOLDER_SESSIONS, base_name)
+    clone_path = os.path.join(FOLDER_SESSIONS, clone_name)
+
+    base_file = f"{base_path}.session"
+    clone_file = f"{clone_path}.session"
+
+    if not os.path.exists(base_file):
+        return clone_path  # Nada que clonar (primera vez, se creará nuevo)
+
+    shutil.copy2(base_file, clone_file)
+    # Copiamos archivos WAL/SHM si existen para consistencia
+    for suffix in ("-wal", "-shm"):
+        src = f"{base_file}{suffix}"
+        dst = f"{clone_file}{suffix}"
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+
+    return clone_path
 
 
-async def start_client():
-    """Inicia el cliente de Telegram."""
-    client = get_client()
+def _get_or_create_client(session_name: str, session_path: str) -> Client:
+    """Obtiene un cliente cacheado o crea uno nuevo para el session_name dado."""
+    if session_name not in _clients:
+        _clients[session_name] = Client(
+            session_path,
+            api_id=API_ID,
+            api_hash=API_HASH,
+            no_updates=True,
+        )
+    return _clients[session_name]
+
+
+def get_client(use_server_session: bool = False, clone_for_cli: bool = False) -> Client:
+    """Retorna un cliente de Pyrogram cacheado por session_name.
+
+    use_server_session=True -> usa SESSION_NAME_SERVER (server).
+    clone_for_cli=True -> clona archivos .session de la sesión principal a un nombre derivado
+                          para evitar locks cuando el server ya está arriba.
+    """
+    os.makedirs(FOLDER_SESSIONS, exist_ok=True)
+
+    if clone_for_cli:
+        # Ej.: base "mi_sesion_premium" -> "mi_sesion_premium_cli"
+        base_name = SESSION_NAME
+        clone_name = f"{SESSION_NAME}_cli"
+        session_path = _copy_session_files(base_name, clone_name)
+        session_name = clone_name
+    else:
+        session_name = SESSION_NAME_SERVER if use_server_session else SESSION_NAME
+        session_path = os.path.join(FOLDER_SESSIONS, session_name)
+
+    return _get_or_create_client(session_name, session_path)
+
+
+async def start_client(use_server_session: bool = False):
+    """Inicia el cliente de Telegram.
+
+    use_server_session=True => usa SESSION_NAME_SERVER para no compartir el .session con CLI.
+    """
+    client = get_client(use_server_session=use_server_session)
     await client.start()
     print("🚀 Cliente de Telegram iniciado")
 

@@ -9,7 +9,11 @@ load_dotenv()
 # --- TELEGRAM API (USERBOT) ---
 API_ID = int(os.getenv("API_ID", ""))
 API_HASH = os.getenv("API_HASH", "")
+# Sesión principal para scripts/CLI (usuario premium)
 SESSION_NAME = os.getenv("SESSION_NAME", "mi_sesion_premium")
+# Sesión del servidor web (por defecto usa la misma que CLI para ecosistema único)
+SESSION_NAME_SERVER = os.getenv("SESSION_NAME_SERVER", SESSION_NAME)
+
 # --- TELEGRAM API (USERBOT2) ---
 API_ID2 = int(os.getenv("API_ID2", ""))
 API_HASH2 = os.getenv("API_HASH2", "")
@@ -72,7 +76,7 @@ else:
 # --- CONTROL DE VELOCIDAD DE BOTS ---
 # 1. Ritmo "Sprint" (Tiempo entre cada foto individual)
 BOT_WAIT_MIN = 2  # Mínimo de segundos a esperar
-BOT_WAIT_MAX = 5  # Máximo de segundos a esperar
+BOT_WAIT_MAX = 3  # Máximo de segundos a esperar
 
 # 2. Descanso "Boxes" (Para evitar bans largos)
 BOT_BATCH_LIMIT = 50    # ¿Cada cuántas descargas paramos?

@@ -4,6 +4,7 @@
     const state = App.state || {};
     const behaviors = App.behaviors = App.behaviors || {};
 
+    // Abre modal de video y sincroniza estados/botones
     function openVideoModal(url, sourceEl) {
         if (!dom.modalOverlay || !dom.modalVideo || !url) return;
         dom.modalVideo.src = url;
@@ -26,6 +27,7 @@
         dom.modalOverlay.classList.add('is-open');
     }
 
+    // Cierra modal de video y limpia estado/preview
     function closeVideoModal() {
         if (!dom.modalOverlay || !dom.modalVideo) return;
         dom.modalOverlay.classList.remove('is-open');

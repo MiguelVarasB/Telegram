@@ -14,6 +14,22 @@
             </div>
         </div>
 
+        <div id="video-edit-form" style="margin-top:12px; width:90%; max-width:90%; background:#1b1b1b; padding:10px 12px; border-radius:8px; border:1px solid #2a2a2a;">
+            <div style="font-size:0.9rem; font-weight:600; color:var(--text-main); margin-bottom:8px;">Editar datos</div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+                <label style="display:flex; flex-direction:column; gap:4px; font-size:0.85rem; color:var(--text-main);">
+                    <span>Título</span>
+                    <input id="video-edit-title" type="text" placeholder="Nuevo título" style="padding:8px; border-radius:6px; border:1px solid #333; background:#0f0f0f; color:var(--text-main);">
+                </label>
+                <label style="display:flex; flex-direction:column; gap:4px; font-size:0.85rem; color:var(--text-main);">
+                    <span>Duración (segundos o mm:ss)</span>
+                    <input id="video-edit-duration" type="text" placeholder="Ej: 125 o 02:05" style="padding:8px; border-radius:6px; border:1px solid #333; background:#0f0f0f; color:var(--text-main);">
+                </label>
+                <button id="video-edit-save" type="button" class="btn-primary" style="align-self:flex-start; padding:8px 14px; border-radius:6px;">Guardar cambios</button>
+                <div id="video-edit-status" style="font-size:0.8rem; color:var(--text-muted); min-height:18px;"></div>
+            </div>
+        </div>
+
         <div style="margin-top:12px; width:90%; max-width:90%;">
             <button type="button" id="btn-hide-video" class="btn-hide-video">
                 <i class="fas fa-eye-slash"></i>

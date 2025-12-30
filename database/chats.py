@@ -104,21 +104,49 @@ async def db_get_chat(chat_id: int) -> dict | None:
             }
 
 
-async def db_upsert_chat_video_count(chat_id: int, videos_count: int, scanned_at: str | None = None) -> None:
-    """Inserta/actualiza el conteo de videos por chat."""
+async def db_upsert_chat_video_count(
+    chat_id: int,
+    videos_count: int,
+    scanned_at: str | None = None,
+    duplicados: int | None = None,
+    indexados: int | None = None,
+) -> None:
+    """Inserta/actualiza el conteo de videos por chat (incluye duplicados e indexados)."""
     scanned_at = scanned_at or datetime.datetime.utcnow().isoformat()
+    # Si no se pasa indexados, asumimos videos_count como fallback (compatibilidad)
+    idx_value = indexados if indexados is not None else videos_count
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
-            INSERT INTO chat_video_counts (chat_id, videos_count, scanned_at)
-            VALUES (?, ?, ?)
+            INSERT INTO chat_video_counts (chat_id, videos_count, scanned_at, duplicados, indexados)
+            VALUES (?, ?, ?, COALESCE(?, 0), COALESCE(?, 0))
             ON CONFLICT(chat_id) DO UPDATE SET
                 videos_count = excluded.videos_count,
-                scanned_at = excluded.scanned_at
+                scanned_at = excluded.scanned_at,
+                duplicados = COALESCE(excluded.duplicados, chat_video_counts.duplicados),
+                indexados = COALESCE(excluded.indexados, chat_video_counts.indexados)
             """,
-            (chat_id, videos_count, scanned_at),
+            (chat_id, videos_count, scanned_at, duplicados, idx_value),
         )
         await db.commit()
+
+
+async def db_get_chat_scan_meta(chat_id: int) -> dict | None:
+    """Obtiene videos_count, scanned_at, duplicados e indexados del chat si existen."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT videos_count, scanned_at, duplicados, indexados FROM chat_video_counts WHERE chat_id = ? LIMIT 1",
+            (chat_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "videos_count": row[0],
+                "scanned_at": row[1],
+                "duplicados": row[2],
+                "indexados": row[3],
+            }
 
 
 async def db_get_chat_folders(chat_id: int) -> list[int]:

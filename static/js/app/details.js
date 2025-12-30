@@ -5,6 +5,7 @@
     const helpers = App.helpers || {};
     const behaviors = App.behaviors = App.behaviors || {};
 
+    // Rellena panel de detalles usando los data-* del elemento de video
     function fillVideoDetailsFromElement(el) {
         if (!dom.detailsContainer || !el) return;
 
@@ -49,8 +50,13 @@
         if (dom.detailsWatchLaterPill) {
             dom.detailsWatchLaterPill.style.display = watchLaterFlag ? 'block' : 'none';
         }
+
+        // Prefill formulario de edición
+        if (dom.videoEditTitleInput) dom.videoEditTitleInput.value = name;
+        if (dom.videoEditDurationInput) dom.videoEditDurationInput.value = duration;
     }
 
+    // Limpia textos del panel de detalles
     function clearVideoDetails() {
         if (dom.detailsTitle) dom.detailsTitle.textContent = '';
         if (dom.detailsMetaLine) dom.detailsMetaLine.textContent = '';
@@ -59,12 +65,64 @@
         if (dom.detailsIds) dom.detailsIds.textContent = '';
     }
 
+    // Limpia contenedor de mensajes relacionados
     function clearVideoMessages() {
         if (dom.messagesContainer) {
             dom.messagesContainer.innerHTML = '';
         }
     }
 
+    async function saveVideoMetadata() {
+        if (!state.currentVideoId || !dom.videoEditTitleInput || !dom.videoEditDurationInput) return;
+        const statusEl = dom.videoEditStatus;
+        const title = dom.videoEditTitleInput.value || '';
+        const duration = dom.videoEditDurationInput.value || '';
+
+        const setStatus = (msg, ok = false) => {
+            if (statusEl) {
+                statusEl.textContent = msg || '';
+                statusEl.style.color = ok ? '#7bd88f' : 'var(--text-muted)';
+            }
+        };
+
+        setStatus('Guardando...');
+        try {
+            const res = await fetch(`/api/video/${encodeURIComponent(state.currentVideoId)}/metadata`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, duration }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err?.detail || 'Error al guardar');
+            }
+            const data = await res.json();
+
+            // Actualizar dataset y UI de la tarjeta actual
+            const el = state.currentVideoElement;
+            if (el) {
+                el.dataset.name = data.title || '';
+                el.dataset.duration = data.duration_text || '';
+                const nameNode = el.querySelector('.file-name');
+                if (nameNode) nameNode.textContent = data.title || '';
+                const durationNode = el.querySelector('.video-duration');
+                if (durationNode) {
+                    durationNode.textContent = data.duration_text || '';
+                    durationNode.style.display = data.duration_text ? 'block' : 'none';
+                }
+            }
+
+            // Refrescar panel de detalles
+            behaviors.fillVideoDetailsFromElement?.(el);
+
+            setStatus('Cambios guardados', true);
+        } catch (e) {
+            console.error('saveVideoMetadata error', e);
+            setStatus(e.message || 'Error al guardar');
+        }
+    }
+
+    // Carga mensajes relacionados a un video vía API y los renderiza
     async function loadVideoMessages(videoId) {
         if (!dom.messagesContainer) return;
         clearVideoMessages();
@@ -119,4 +177,5 @@
     behaviors.clearVideoDetails = clearVideoDetails;
     behaviors.clearVideoMessages = clearVideoMessages;
     behaviors.loadVideoMessages = loadVideoMessages;
+    behaviors.saveVideoMetadata = saveVideoMetadata;
 })();

@@ -11,7 +11,7 @@ from .helpers import (
     force_resolve_peer,
     log_timing
 )
-from .websocket import FolderWSManager
+from .websocket import FolderWSManager, ws_manager
 
 __all__ = [
     "obtener_id_limpio",
@@ -22,5 +22,6 @@ __all__ = [
     "save_image_as_webp",
     "force_resolve_peer",
     "FolderWSManager",
+    "ws_manager",
     "log_timing"
 ]

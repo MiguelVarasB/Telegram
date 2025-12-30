@@ -1,5 +1,6 @@
 (function () {
     // --- Instrumentación de rendimiento en cliente ---
+    // Mide tiempos de carga (nav → DOM ready → load) y los loguea en consola.
     try {
         const nav = performance.getEntriesByType('navigation')[0];
         if (nav) {
@@ -54,6 +55,10 @@
     dom.toggleDuplicates = document.getElementById('toggle-duplicates');
     dom.hideVideoButton = document.getElementById('btn-hide-video');
     dom.watchLaterButton = document.getElementById('btn-watch-later');
+    dom.videoEditTitleInput = document.getElementById('video-edit-title');
+    dom.videoEditDurationInput = document.getElementById('video-edit-duration');
+    dom.videoEditSaveBtn = document.getElementById('video-edit-save');
+    dom.videoEditStatus = document.getElementById('video-edit-status');
     dom.channelModalOverlay = document.getElementById('channel-modal-overlay') || null;
     dom.channelModalClose = document.getElementById('channel-modal-close') || null;
     dom.channelModalTitle = document.getElementById('channel-modal-title') || null;
@@ -65,8 +70,10 @@
     dom.statsOverlay = document.getElementById('stats-modal-overlay');
     dom.statsClose = document.getElementById('stats-modal-close-btn');
     dom.statsContent = document.getElementById('stats-modal-content');
+    dom.btnSyncFaltantes = document.getElementById('btn-sync-faltantes');
 
     // --- Lazy load de fotos de canal ---
+    // Crea un observer para cargar imágenes de perfil cuando entran en viewport.
     function setupLazyChatPhotos(root) {
         try {
             const observer = new IntersectionObserver(function (entries, obs) {
@@ -98,12 +105,14 @@
     }
 
     // --- Estado ---
+    // Mantiene caché de hiddenVideos y referencias de selección actual.
     state.hiddenVideos = state.hiddenVideos || loadHiddenVideos();
     state.currentChannelId = (document.body?.dataset?.currentChannelId) || null;
     state.currentVideoElement = null;
     state.currentVideoId = null;
 
     // --- Helpers de formateo ---
+    // Escapa texto y formatea números para reuso en otras vistas.
     function escapeHtmlStats(str) {
         if (str === null || str === undefined) return '';
         return String(str)
@@ -126,6 +135,7 @@
     }
 
     // --- Videos ocultos ---
+    // Lee/guarda sets de videos ocultos y aplica estado a la grilla.
     function loadHiddenVideos() {
         try {
             const raw = localStorage.getItem('hidden_videos');
@@ -160,6 +170,7 @@
     }
 
     // --- Ver más tarde ---
+    // Pinta estado de "ver más tarde" tanto en DOM como en el botón principal.
     function applyWatchLaterStateToElement(el) {
         if (!el) return;
         const watchLaterFlag = el.dataset.watchLater === '1';
@@ -223,6 +234,7 @@
     }
 
     // --- Duplicados ---
+    // Oculta duplicados cuando toggle está activado, manteniendo uno visible.
     function applyDuplicateFilter() {
         if (!dom.toggleDuplicates) return;
         const hideMode = dom.toggleDuplicates.checked;
@@ -255,6 +267,7 @@
     }
 
     // --- Hover Previews ---
+    // Carga un video preview al hacer hover sobre cards de video.
     function setupHoverPreviews() {
         const cards = document.querySelectorAll('.file-item[data-item-type="video"]');
         cards.forEach(function (card) {

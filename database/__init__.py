@@ -10,6 +10,7 @@ from .chats import (
     db_get_chat_folders,
     db_add_chat_folder,
     db_upsert_chat_video_count,
+    db_get_chat_scan_meta,
 )
 from .videos import db_upsert_video, db_add_video_file_id, db_upsert_video_message, db_get_video_messages, db_count_videos_by_chat
 from .folders import get_folder_items_from_db
@@ -23,6 +24,7 @@ __all__ = [
     "db_get_chat_folders",
     "db_add_chat_folder",
     "db_upsert_chat_video_count",
+    "db_get_chat_scan_meta",
     "db_upsert_video",
     "db_add_video_file_id",
     "db_upsert_video_message",

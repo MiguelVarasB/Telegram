@@ -8,7 +8,7 @@ import asyncio
 import aiosqlite
 from contextlib import AsyncExitStack
 from pyrogram import Client
-from pyrogram.errors import FloodWait, ChannelPrivate, ChatAdminRequired, PeerIdInvalid
+from pyrogram.errors import FloodWait, ChannelPrivate, ChatAdminRequired, PeerIdInvalid, FileReferenceExpired
 
 from config import DB_PATH, THUMB_FOLDER, API_ID, API_HASH, BOT_POOL_TOKENS, CACHE_DUMP_VIDEOS_CHANNEL_ID
 from utils import save_image_as_webp
@@ -39,45 +39,62 @@ async def _marcar_listo(video_id):
 
 async def _descargar_con_cliente(client, chat_id, message_id, file_unique_id, folder, final_path, es_bot=False):
     """Lógica genérica de descarga para reusar en Bot y User."""
-    try:
-        # 1. Obtener mensaje (Aquí es donde el Bot genera SU propio file_id válido)
-        msg = await client.get_messages(chat_id, message_id)
 
-        if not msg: return False
+    async def _intentar_descarga():
+        msg = await client.get_messages(chat_id, message_id)
+        if not msg:
+            return False
 
         media = getattr(msg, "video", None) or getattr(msg, "document", None)
-        if not media: return False
+        if not media:
+            return False
 
         thumbs = getattr(media, "thumbs", None)
         thumb = thumbs[-1] if thumbs else getattr(media, "thumb", None)
-        if not thumb: return False
+        if not thumb:
+            return False
 
-        # 2. Descargar
         tmp_dir = os.path.join(THUMB_FOLDER, "_tmp")
         os.makedirs(tmp_dir, exist_ok=True)
         tmp_path = os.path.join(tmp_dir, f"{chat_id}_{message_id}_{file_unique_id}_{'bot' if es_bot else 'user'}.jpg")
 
         down_path = await client.download_media(thumb.file_id, file_name=tmp_path)
-        if not down_path: return False
+        if not down_path:
+            return False
 
-        # 3. Convertir
         await asyncio.to_thread(save_image_as_webp, down_path, final_path)
-        
-        if os.path.exists(down_path): os.remove(down_path)
-        
+
+        if os.path.exists(down_path):
+            os.remove(down_path)
+
         if os.path.exists(final_path) and os.path.getsize(final_path) > 100:
             return True
-            
+
+        return False
+
+    try:
+        res = await _intentar_descarga()
+        if res is True:
+            return True
+    except FileReferenceExpired:
+        # Refrescar file_id reobteniendo el mensaje y reintentando una vez
+        try:
+            res = await _intentar_descarga()
+            if res is True:
+                return True
+        except FileReferenceExpired:
+            return False
+        except Exception:
+            return False
     except (ChannelPrivate, ChatAdminRequired, PeerIdInvalid):
-        return "SIN_ACCESO" # Señal para cambiar de estrategia
+        return "SIN_ACCESO"  # Señal para cambiar de estrategia
     except FloodWait as e:
         print(f"⏳ FloodWait ({'BOT' if es_bot else 'USER'}) {e.value}s")
         await asyncio.sleep(e.value)
         return False
-    except Exception as e:
-        # print(f"Err {e}")
+    except Exception:
         return False
-    
+
     return False
 
 async def _procesar_hibrido(sem_bot, bot_clients, row, idx):

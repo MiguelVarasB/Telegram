@@ -33,7 +33,7 @@ from utils import save_image_as_webp, log_timing
 logging.basicConfig(level=logging.ERROR)
 # Silenciar trazas de Pyrogram (solo criticidad alta)
 pyro_root = logging.getLogger("pyrogram")
-pyro_root.setLevel(logging.CRITICAL)
+pyro_root.setLevel(logging.ERROR)
 pyro_root.propagate = True
 
 # --- VARIABLES GLOBALES DE TELEMETRÍA ---
@@ -55,24 +55,35 @@ bot_analytics = {}
 flood_incidents = []
 tareas_totales = 0
 
-FloodWait_forzado = 20
+FloodWait_forzado = 60*1
 LIMITE_DB=999999
 
 BOTS_BLOQUEADOS=[
-       1, #Este nunca usarlo en este script
-      # 10, 
+     #  1, #Este nunca usarlo en este script
+      # 2,
+     #  4,
+      # 6,
+       # 10, 
+      # 12,
+    #  13,
+      # 14,
+      # 17,
+     # 20,
      #  21, 
-      # 22, 
+     #  22, 
      #  23,
-
-       17,
-       29
+    #  24,
+     #25,
+     # 27,
+     #  28,
+     #  29,
+      # 30
 ]
 
 
 
 # Semáforo Global (Ajustado a 3 por seguridad de auth.ExportAuthorization)
-MAX_CONCURRENT_DOWNLOADS = 9
+MAX_CONCURRENT_DOWNLOADS = 3
 download_semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
 
@@ -463,7 +474,7 @@ async def main(recycle_when_all_floodwait=False):
         if all_in_flood:
             return {"tareas_iniciales": tareas_iniciales, "descargas": 0, "errores": 0, "recycled": True}
 
-    log_timing(f" Iniciando V8 (TELEMETRÍA + SEMÁFORO={MAX_CONCURRENT_DOWNLOADS})...+ {len(BOT_POOL_TOKENS)} Bots")
+    log_timing(f" Iniciando V8 (TELEMETRÍA + SEMÁFORO={MAX_CONCURRENT_DOWNLOADS})...+ {len(BOT_POOL_TOKENS)} Bots - {len(BOTS_BLOQUEADOS)} Bots bloqueados ")
     queue = asyncio.Queue()
     for t in tareas: queue.put_nowait(t)
 

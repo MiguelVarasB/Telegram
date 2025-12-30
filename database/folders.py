@@ -9,11 +9,18 @@ from config import DB_PATH, CACHE_DUMP_VIDEOS_CHANNEL_ID
 from .chats import db_get_chat_folders
 from utils import serialize_pyrogram, json_serial, log_timing
 
-async def get_all_chats_with_counts(folder_name: str | None = None) -> List[dict]:
+async def get_all_chats_with_counts(
+    folder_name: str | None = None,
+    limite_videos: int | None = None,
+    sort_field: str = "faltantes",
+    direction: str = "desc",
+) -> List[dict]:
     """
     Devuelve todos los chats conocidos con conteo de videos (Async).
     Útil para la carpeta especial "Todos los canales".
     """
+    limite = limite_videos if limite_videos is not None else 9_999_999_999
+
     async with aiosqlite.connect(DB_PATH) as db:
         log_timing("Iniciando consulta (chats)")
         chats_query = """
@@ -32,25 +39,19 @@ async def get_all_chats_with_counts(folder_name: str | None = None) -> List[dict
         async with db.execute(chats_query) as cursor:
             chat_rows = await cursor.fetchall()
 
-        log_timing("Consulta conteos indexados")
-        counts_query = """
-            SELECT chat_id, COUNT(id) AS indexed_videos
-            FROM videos_telegram
-            GROUP BY chat_id
-        """
-        async with db.execute(counts_query) as cursor:
-            count_rows = await cursor.fetchall()
-        counts_map = {r[0]: r[1] for r in count_rows}
+        # Usamos indexados de chat_video_counts en lugar de contar en videos_telegram
 
         log_timing("Consulta conteos totales (scan)")
         totals_query = """
-            SELECT chat_id, videos_count, scanned_at
+            SELECT chat_id, videos_count, indexados, scanned_at, COALESCE(duplicados, 0) AS duplicados
             FROM chat_video_counts
+            WHERE videos_count <= ?
         """
-        async with db.execute(totals_query) as cursor:
+        async with db.execute(totals_query, (limite,)) as cursor:
             totals_rows = await cursor.fetchall()
-        totals_map = {r[0]: (r[1], r[2]) for r in totals_rows}
-
+        totals_map = {r[0]: (r[1], r[2], r[3], r[4]) for r in totals_rows}
+        log_timing(f"Limite videos: {limite}")
+        log_timing(f"Total chats con conteo: {len(totals_map)}")
         log_timing("Consulta folders por chat")
         folders_query = """
             SELECT chat_id, folder_id
@@ -67,8 +68,10 @@ async def get_all_chats_with_counts(folder_name: str | None = None) -> List[dict
 
     for row in chat_rows:
         chat_id, name, chat_type, photo_id, username, last_msg_dt = row
-        indexed_videos = counts_map.get(chat_id, 0)
-        total_videos, scanned_at = totals_map.get(chat_id, (0, None))
+        total_videos, indexed_videos, scanned_at, duplicados = totals_map.get(chat_id, (0, 0, None, 0))
+        unicos_totales = max(total_videos - duplicados, 0)
+        faltantes = max(unicos_totales - indexed_videos, 0)
+        # Nota: Ya no es necesario obtener indexed_videos de counts_map
 
         # Excluir el canal de dump
         if CACHE_DUMP_VIDEOS_CHANNEL_ID and chat_id == CACHE_DUMP_VIDEOS_CHANNEL_ID:
@@ -129,13 +132,57 @@ async def get_all_chats_with_counts(folder_name: str | None = None) -> List[dict
             "scanned_at": scanned_at,
             "chat_type": chat_type,
             "last_message_date": last_msg_dt,
+            "duplicados": duplicados,
+            "faltantes": faltantes,
+            "unicos_totales": unicos_totales,
+            "is_complete": faltantes == 0,
         })
         
     log_timing("Items agregados")
+
+    dir_mult = -1 if direction.lower() == "desc" else 1
+
+    def sort_key(item):
+        if sort_field == "indexados":
+            return dir_mult * (item.get("indexed_videos") or 0)
+        if sort_field == "totales":
+            return dir_mult * (item.get("total_videos") or 0)
+        if sort_field == "nombre":
+            return (item.get("name") or "").lower()
+        if sort_field == "fecha_scan":
+            return dir_mult * (
+                datetime.datetime.fromisoformat(item["scanned_at"])
+                if item.get("scanned_at")
+                else datetime.datetime.min
+            )
+        if sort_field == "ultimo_msg":
+            return dir_mult * (
+                datetime.datetime.fromisoformat(item["last_message_date"])
+                if item.get("last_message_date")
+                else datetime.datetime.min
+            )
+        if sort_field == "completos":
+            return (
+                0 if item.get("faltantes", 0) == 0 else 1,
+                dir_mult * (item.get("total_videos") or 0),
+            )
+        return (
+            dir_mult * (item.get("faltantes") or 0),
+            dir_mult * (item.get("total_videos") or 0),
+        )
+
+    if sort_field == "nombre":
+        items.sort(key=sort_key, reverse=direction.lower() == "desc")
+    else:
+        items.sort(key=sort_key)
+
     return items
 
 
-async def get_folder_items_from_db(folder_id: int, folder_name: str | None = None) -> List[dict]:
+async def get_folder_items_from_db(
+    folder_id: int,
+    folder_name: str | None = None,
+) -> List[dict]:
     """
     Devuelve la lista de chats de una carpeta desde la BD local (Async).
     """
@@ -166,7 +213,15 @@ async def get_folder_items_from_db(folder_id: int, folder_name: str | None = Non
     log_timing("Consulta lista")
     # Procesar resultados sin bloquear I/O
     for row in rows:
-        chat_id, name, chat_type, photo_id, username, last_msg_dt, video_count = row
+        (
+            chat_id,
+            name,
+            chat_type,
+            photo_id,
+            username,
+            last_msg_dt,
+            video_count,
+        ) = row
         
         # Ahora usamos await porque db_get_chat_folders es async
         folders = await db_get_chat_folders(chat_id)
@@ -204,6 +259,6 @@ async def get_folder_items_from_db(folder_id: int, folder_name: str | None = Non
             "username": username,
             "telegram_link": telegram_link,
         })
-    
+        
         log_timing("Items cargados")
     return items

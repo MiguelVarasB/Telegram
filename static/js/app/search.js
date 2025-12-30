@@ -4,6 +4,7 @@
     const helpers = App.helpers || {};
     const behaviors = App.behaviors = App.behaviors || {};
 
+    // Inicializa handlers de búsqueda y renderizado de resultados
     function initSearchHandlers() {
         const searchForm = document.getElementById('search-form');
         if (!searchForm) return;
@@ -13,6 +14,7 @@
         const typeSelect = document.getElementById('search-type');
         let limitInput = document.getElementById('search-limit');
 
+        // Ejecuta búsqueda contra /api/search y re-renderiza la grilla
         async function performSearch(ev) {
             if (ev) ev.preventDefault();
             const q = (searchInput?.value || '').trim();
@@ -137,6 +139,7 @@
 
         searchForm.addEventListener('submit', performSearch);
 
+        // Si la URL ya trae query, inicializa formulario y dispara búsqueda
         const initialParams = new URLSearchParams(window.location.search || '');
         const initialQ = initialParams.get('q');
         if (initialQ) {

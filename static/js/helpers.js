@@ -3,6 +3,7 @@
     const state = g.state;
     const helpers = g.helpers;
 
+    // Sanitiza texto para evitar inyección HTML en strings renderizadas
     function escapeHtml(str) {
         if (str === null || str === undefined) return '';
         return String(str)
@@ -13,6 +14,7 @@
             .replace(/'/g, '&#39;');
     }
 
+    // Formatea números con separador de miles (locale ES-AR)
     function formatThousands(value) {
         if (value === null || value === undefined) return '';
         const n = Number(value);
@@ -24,6 +26,7 @@
         }
     }
 
+    // Lee del localStorage el set de videos ocultos
     function loadHiddenVideos() {
         try {
             const raw = localStorage.getItem('hidden_videos');
@@ -36,6 +39,7 @@
         }
     }
 
+    // Persiste en localStorage el set de videos ocultos
     function saveHiddenVideos(set) {
         try {
             localStorage.setItem('hidden_videos', JSON.stringify(Array.from(set || [])));
@@ -44,6 +48,7 @@
 
     state.hiddenVideos = state.hiddenVideos || loadHiddenVideos();
 
+    // APIs públicas de helpers
     helpers.escapeHtml = escapeHtml;
     helpers.escapeHtmlStats = escapeHtml; // alias
     helpers.formatThousands = formatThousands;

@@ -7,6 +7,7 @@
             <form method="get" action="{{ pagination.base_path }}">
                 <input type="hidden" name="page" value="{{ pagination.page }}">
                 <input type="hidden" name="per_page" value="{{ pagination.per_page }}">
+                <input type="hidden" name="direction" value="{{ pagination.direction }}">
                 <label for="sort">Ordenar por:</label>
                 <select name="sort" id="sort" onchange="this.form.submit()">
                     <option value="fecha" {% if pagination.sort == 'fecha' %}selected{% endif %}>Fecha</option>
@@ -17,6 +18,11 @@
                     <option value="desc" {% if pagination.direction == 'desc' %}selected{% endif %}>Desc</option>
                     <option value="asc" {% if pagination.direction == 'asc' %}selected{% endif %}>Asc</option>
                 </select>
+                <select name="thumb_filter" onchange="this.form.submit()">
+                    <option value="con" {% if pagination.thumb_filter == 'con' %}selected{% endif %}>Con thumb</option>
+                    <option value="sin" {% if pagination.thumb_filter == 'sin' %}selected{% endif %}>Sin thumb</option>
+                    <option value="todos" {% if pagination.thumb_filter == 'todos' %}selected{% endif %}>Todos</option>
+                </select>
             </form>
         </div>
         {% endif %}
@@ -24,7 +30,27 @@
 {% else %}
     <div class="section-title results-title-bar">
         <span id="results-title">Contenido</span>
-        <div id="limites" style="display:inline-flex" class="results-limit-control">
+        {% if current_folder_id is defined %}
+        <div class="sort-controls" style="margin-left:16px; display:flex; align-items:center; gap:8px;">
+            <form method="get" action="{{ current_folder_url or '' }}" style="display:flex; align-items:center; gap:8px;">
+                <label for="sort-folder">Ordenar por:</label>
+                <select name="sort" id="sort-folder" onchange="this.form.submit()">
+                    <option value="faltantes" {% if current_sort == 'faltantes' %}selected{% endif %}>Faltantes</option>
+                    <option value="indexados" {% if current_sort == 'indexados' %}selected{% endif %}>Indexados</option>
+                    <option value="totales" {% if current_sort == 'totales' %}selected{% endif %}>Totales</option>
+                    <option value="nombre" {% if current_sort == 'nombre' %}selected{% endif %}>Nombre</option>
+                    <option value="fecha_scan" {% if current_sort == 'fecha_scan' %}selected{% endif %}>Fecha scan</option>
+                    <option value="ultimo_msg" {% if current_sort == 'ultimo_msg' %}selected{% endif %}>Último mensaje</option>
+                    <option value="completos" {% if current_sort == 'completos' %}selected{% endif %}>Completos primero</option>
+                </select>
+                <select name="direction" onchange="this.form.submit()">
+                    <option value="desc" {% if current_direction == 'desc' %}selected{% endif %}>Desc</option>
+                    <option value="asc" {% if current_direction == 'asc' %}selected{% endif %}>Asc</option>
+                </select>
+            </form>
+        </div>
+        {% endif %}
+        <div id="limites" style="display:inline-flex; display:none" class="results-limit-control">
             <label for="search-limit">Límite</label>
             <input
                 type="number"
@@ -37,6 +63,9 @@
                 inputmode="numeric"
             >
         </div>
+        <button type="button" id="btn-sync-faltantes" class="btn-sync" style="margin-left:auto; display:none">
+            Sincronizar faltantes
+        </button>
     </div>
 {% endif %}
 

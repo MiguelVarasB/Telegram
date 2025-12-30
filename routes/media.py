@@ -10,7 +10,7 @@ import aiosqlite
 from fastapi import APIRouter, Request, Header, HTTPException, BackgroundTasks, Query, Body
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import FileResponse, StreamingResponse
-from pyrogram.errors import FloodWait
+from pyrogram.errors import FloodWait, FileReferenceExpired
 
 from config import TEMPLATES_DIR, THUMB_FOLDER, GRUPOS_THUMB_FOLDER, MAIN_TEMPLATE, DUMP_FOLDER, DB_PATH, CACHE_DUMP_VIDEOS_CHANNEL_ID, SMART_CACHE_ENABLED
 from services import get_client, TelegramVideoSender, prefetch_channel_videos_to_ram, background_thumb_downloader
@@ -486,6 +486,7 @@ async def get_photo(file_id: str, tipo: str = "video", chat_id: int = None, vide
     # 2. Si no existe, descargar con SEMÁFORO y protección
     try:
         async with thumb_download_sem:
+            row_info = None
             # Si es thumbnail de VIDEO con chat_id + video_id, usar lógica híbrida
             if tipo == "video" and chat_id is not None and video_id is not None:
                 # Usar caché para consultas BD repetidas
@@ -495,7 +496,7 @@ async def get_photo(file_id: str, tipo: str = "video", chat_id: int = None, vide
                     try:
                         async with aiosqlite.connect(DB_PATH) as db:
                             async with db.execute(
-                                "SELECT chat_id, message_id, file_unique_id FROM videos_telegram WHERE id = ?",
+                                "SELECT chat_id, message_id, dump_message_id, file_unique_id FROM videos_telegram WHERE id = ?",
                                 (video_id,),
                             ) as cursor:
                                 row = await cursor.fetchone()
@@ -507,16 +508,21 @@ async def get_photo(file_id: str, tipo: str = "video", chat_id: int = None, vide
                                     keys_to_delete = list(thumb_db_cache.keys())[:200]
                                     for k in keys_to_delete:
                                         thumb_db_cache.pop(k, None)
-                    except Exception as e:
+                    except Exception:
                         row = None
 
+                row_info = row
                 if row:
-                    db_chat_id, message_id, file_unique_id = row
+                    db_chat_id, message_id, dump_message_id, file_unique_id = row
                     try:
+                        # Preferir el mensaje de dump si existe
+                        chat_for_fetch = CACHE_DUMP_VIDEOS_CHANNEL_ID if dump_message_id else db_chat_id
+                        msg_id_for_fetch = dump_message_id or message_id
+
                         res = await _descargar_con_cliente(
                             client,
-                            db_chat_id,
-                            message_id,
+                            chat_for_fetch,
+                            msg_id_for_fetch,
                             file_unique_id,
                             os.path.dirname(filepath),
                             filepath,
@@ -529,26 +535,96 @@ async def get_photo(file_id: str, tipo: str = "video", chat_id: int = None, vide
                         pass
                     # Si falla, continuamos al fallback con file_id
             
+            async def _download_to_webp(fid: str):
+                downloaded_path = await client.download_media(fid, file_name=temp_path)
+                if downloaded_path:
+                    await asyncio.to_thread(save_image_as_webp, downloaded_path, filepath)
+                    if os.path.exists(downloaded_path):
+                        os.remove(downloaded_path)
+                    return True
+                return False
             # Fallback: descarga directa con file_id
             with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as tmp:
                 temp_path = tmp.name
 
+            async def _refresh_and_download() -> bool:
+                """
+                Reobtiene un file_id fresco consultando el mensaje original y reintenta la descarga.
+                Devuelve True si pudo descargar/convertir.
+                """
+                nonlocal row_info
+                try:
+                    if row_info is None and video_id and chat_id:
+                        async with aiosqlite.connect(DB_PATH) as db:
+                            async with db.execute(
+                                "SELECT chat_id, message_id, dump_message_id FROM videos_telegram WHERE id = ?",
+                                (video_id,),
+                            ) as cursor:
+                                row_info = await cursor.fetchone()
+                    if row_info:
+                        db_chat_id, message_id, dump_message_id, *_ = row_info
+                        chat_for_fetch = CACHE_DUMP_VIDEOS_CHANNEL_ID if dump_message_id else db_chat_id
+                        msg_id_for_fetch = dump_message_id or message_id
+                        msg = await client.get_messages(chat_for_fetch, msg_id_for_fetch)
+                        media = getattr(msg, "photo", None) or getattr(msg, "video", None) or getattr(msg, "document", None)
+                        if not media:
+                            return False
+                        thumb = getattr(media, "thumb", None)
+                        fresh_file_id = thumb.file_id if thumb else media.file_id
+                        new_path = await client.download_media(fresh_file_id, file_name=temp_path)
+                        if new_path:
+                            await asyncio.to_thread(save_image_as_webp, new_path, filepath)
+                            if os.path.exists(new_path):
+                                os.remove(new_path)
+                            return True
+                except FileReferenceExpired:
+                    return False
+                except Exception:
+                    return False
+                return False
+
+            # Si ya tenemos info del mensaje, intentar refrescar primero antes del file_id viejo
+            if row_info:
+                refreshed = await _refresh_and_download()
+                if refreshed and os.path.exists(filepath):
+                    return FileResponse(filepath)
+                # Si no se pudo refrescar, seguimos al fallback con el file_id recibido.
+
             try:
-                downloaded_path = await client.download_media(file_id, file_name=temp_path)
-                if downloaded_path:
-                    # Convertir a WebP en thread aparte (más rápido)
-                    await asyncio.to_thread(save_image_as_webp, downloaded_path, filepath)
-                    # Limpieza
-                    if os.path.exists(downloaded_path):
-                        os.remove(downloaded_path)
+                ok = await _download_to_webp(file_id)
+                if ok and os.path.exists(filepath):
                     return FileResponse(filepath)
                 else:
-                    os.remove(temp_path)
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
                     return {"error": "failed_download"}
+            except FileReferenceExpired:
+                refreshed = await _refresh_and_download()
+                if refreshed and os.path.exists(filepath):
+                    return FileResponse(filepath)
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                return {"error": "file_reference_expired"}
             except FloodWait as e:
                 os.remove(temp_path)
                 return {"error": "flood_wait", "retry_after": e.value}
             except Exception:
+                # Intento final: si tenemos row_info y media sin thumb, probar media.file_id directo
+                try:
+                    if row_info:
+                        db_chat_id, message_id, dump_message_id, *_ = row_info
+                        chat_for_fetch = CACHE_DUMP_VIDEOS_CHANNEL_ID if dump_message_id else db_chat_id
+                        msg_id_for_fetch = dump_message_id or message_id
+                        msg = await client.get_messages(chat_for_fetch, msg_id_for_fetch)
+                        media = getattr(msg, "photo", None) or getattr(msg, "video", None) or getattr(msg, "document", None)
+                        if media:
+                            ok = await _download_to_webp(media.file_id)
+                            if ok and os.path.exists(filepath):
+                                return FileResponse(filepath)
+                except FileReferenceExpired:
+                    pass
+                except Exception:
+                    pass
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
                 return {"error": "download_failed"}
@@ -659,7 +735,6 @@ async def api_stats(limit: int = 10):
                 restricted_rows = await cursor.fetchall()
 
     def build_link(chat_id: int) -> str:
-        # Usamos la ruta local de la app para abrir el canal/grupo
         return f"/channel/{chat_id}"
 
     top_groups = []

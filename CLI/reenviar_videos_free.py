@@ -15,7 +15,7 @@ from pyrogram.raw.types import (
     PeerChat,
     PeerChannel,
 )
-
+from utils import save_image_as_webp, log_timing
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Importamos tu configuración
@@ -30,10 +30,10 @@ from config import (
 )
 
 # --- CONFIGURACIÓN ---
-LIMITE = 2000 
-BATCH = 30  
-SLEEP_ENVIO = 20 # Subido un poco para ser más orgánico
-ESPERA_CICLOS = 180
+LIMITE = 1000 
+BATCH = 20  
+SLEEP_ENVIO = 15 # Subido un poco para ser más orgánico
+ESPERA_CICLOS = 60*5
 
 async def check_database_schema():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -53,7 +53,7 @@ async def marcar_fallidos(video_ids, razon):
             tuple(video_ids),
         )
         await db.commit()
-    print(f"\n🗑️ Marcados {len(video_ids)} registros como dump_fail=1. Razón: {razon}")
+    log_timing(f"\n🗑️ Marcados {len(video_ids)} registros como dump_fail=1. Razón: {razon}")
 
 async def marcar_chat_fallido(chat_id, razon):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -62,7 +62,7 @@ async def marcar_chat_fallido(chat_id, razon):
             (chat_id,),
         )
         await db.commit()
-    print(f"\n🗑️ Marcado chat {chat_id} como NO reenviable. Razón: {razon}")
+    log_timing(f"\n🗑️ Marcado chat {chat_id} como NO reenviable. Razón: {razon}")
 
 # ... (Las funciones _raw_next_offset_peer y _warmup_dialogs_for_peer se mantienen igual) ...
 # Para ahorrar espacio, asumo que las copias del código original o las importas.
@@ -80,10 +80,10 @@ async def main(app: Client):
     # Ya no iniciamos el cliente aquí, asumimos que viene conectado.
     
     if not CACHE_DUMP_VIDEOS_CHANNEL_ID or not CANALES_CON_ACCESO_FREE:
-        print("❌ ERROR: Configuración incompleta en config.py")
+        log_timing("❌ ERROR: Configuración incompleta en config.py")
         return
 
-    print(f"🚀 Buscando hasta {LIMITE} videos pendientes en DB...")
+    log_timing(f"🚀 Buscando hasta {LIMITE} videos pendientes en DB...")
 
     # 1. Buscar videos pendientes
     placeholders_chats = ",".join(["?"] * len(CANALES_CON_ACCESO_FREE))
@@ -102,16 +102,16 @@ async def main(app: Client):
             pendientes = await cursor.fetchall()
 
     if not pendientes:
-        print("✅ No hay videos pendientes por ahora.")
+        log_timing("✅ No hay videos pendientes por ahora.")
         return
 
-    print(f"📦 Encontrados {len(pendientes)} videos. Procesando...")
+    log_timing(f"📦 Encontrados {len(pendientes)} videos. Procesando...")
 
     # 2. Validar destino una vez por ciclo
     try:
         await app.get_chat(CACHE_DUMP_VIDEOS_CHANNEL_ID)
     except Exception as e:
-        print(f"❌ Error accediendo al canal DUMP: {e}")
+        log_timing(f"❌ Error accediendo al canal DUMP: {e}")
         return
 
     # 3. Agrupar y Reenviar
@@ -153,18 +153,18 @@ async def main(app: Client):
                     await db.commit()
 
                 total_ok += len(nuevos_msgs)
-                print("✅")
+                log_timing("✅")
                 await asyncio.sleep(SLEEP_ENVIO)
 
             except FloodWait as e:
-                print(f"\n⏳ FloodWait real de Telegram: Esperando {e.value} segundos...")
+                log_timing(f"\n⏳ FloodWait real de Telegram: Esperando {e.value} segundos...")
                 await asyncio.sleep(e.value) # Respetamos el wait sin cerrar el cliente
             except PeerIdInvalid:
                 await marcar_chat_fallido(chat_origin, "PEER_ID_INVALID")
                 break
             except MessageIdInvalid:
                 await marcar_fallidos([v[0] for v in chunk], "MESSAGE_ID_INVALID")
-                print("⚠️ Lote omitido por mensajes inválidos")
+                log_timing("⚠️ Lote omitido por mensajes inválidos")
                 continue
             except ValueError as e:
                 if "Peer id invalid" in str(e):
@@ -175,9 +175,9 @@ async def main(app: Client):
                 if "CHAT_FORWARDS_RESTRICTED" in str(e):
                     await marcar_chat_fallido(chat_origin, "RESTRICTED")
                     break # Saltamos al siguiente chat
-                print(f"\n❌ Error enviando lote: {e}")
+                log_timing(f"\n❌ Error enviando lote: {e}")
 
-    print(f"🏁 Ciclo terminado. Total reenviados: {total_ok}")
+    log_timing(f"🏁 Ciclo terminado. Total reenviados: {total_ok}")
 
 
 # --- NUEVO LOOP DE CONTROL ---
@@ -192,23 +192,23 @@ if __name__ == "__main__":
         # Usamos el context manager para iniciar/cerrar la sesión correctamente
         async with app:
             me = await app.get_me()
-            print(f"👤 Cliente iniciado: {me.first_name} (@{me.username})")
+            log_timing(f"👤 Cliente iniciado: {me.first_name} (@{me.username})")
             await check_database_schema()
 
             ciclo = 0
             while True:
                 ciclo += 1
                 try:
-                    print(f"\n--- CICLO #{ciclo} ---")
+                    log_timing(f"\n--- CICLO #{ciclo} ---")
                     # Pasamos 'app' que ya está conectada
                     await main(app) 
                 except Exception as e:
-                    print(f"❌ Error crítico en ciclo: {e}")
+                    log_timing(f"❌ Error crítico en ciclo: {e}")
                 
-                print(f"⏳ Durmiendo {ESPERA_CICLOS}s...")
+                log_timing(f"⏳ Durmiendo {ESPERA_CICLOS}s...")
                 await asyncio.sleep(ESPERA_CICLOS)
 
     try:
         asyncio.run(run_ciclico())
     except KeyboardInterrupt:
-        print("\n🛑 Detenido por usuario.")
+        log_timing("\n🛑 Detenido por usuario.")
