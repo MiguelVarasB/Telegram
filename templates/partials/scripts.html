@@ -4,11 +4,13 @@ var SECCION='Home'
 </script>   
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-3fpdpPkuhNsnv7v8Qbml4a9j+UGEyjsh+7GIRN8J/Mk=" crossorigin="anonymous"></script>
-<script src="/static/js/helpers.js"></script>
-<script src="/static/js/app/core.js"></script>
-<script src="/static/js/app/details.js"></script>
-<script src="/static/js/app/modal.js"></script>
-<script src="/static/js/app/stats.js"></script>
-<script src="/static/js/app/channel.js"></script>
-<script src="/static/js/app/search.js"></script>
-<script src="/static/js/app/main.js"></script>
+{# Cache-buster simple para evitar F5 duro (número aleatorio) #}
+{% set V = range(1000000000) | random %}
+<script src="/static/js/helpers.js?v={{ V }}"></script>
+<script src="/static/js/app/core.js?v={{ V }}"></script>
+<script src="/static/js/app/details.js?v={{ V }}"></script>
+<script src="/static/js/app/modal.js?v={{ V }}"></script>
+<script src="/static/js/app/stats.js?v={{ V }}"></script>
+<script src="/static/js/app/channel.js?v={{ V }}"></script>
+<script src="/static/js/app/search.js?v={{ V }}"></script>
+<script src="/static/js/app/main.js?v={{ V }}"></script>

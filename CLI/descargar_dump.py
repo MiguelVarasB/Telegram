@@ -67,13 +67,16 @@ BOTS_BLOQUEADOS=[
       # 12,
     #  13,
       # 14,
+      15,
+      16,
       # 17,
      # 20,
      #  21, 
-     #  22, 
+     22, 
      #  23,
     #  24,
      #25,
+     26,
      # 27,
      #  28,
      #  29,
@@ -83,7 +86,7 @@ BOTS_BLOQUEADOS=[
 
 
 # Semáforo Global (Ajustado a 3 por seguridad de auth.ExportAuthorization)
-MAX_CONCURRENT_DOWNLOADS = 3
+MAX_CONCURRENT_DOWNLOADS = 8
 download_semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
 
@@ -99,6 +102,19 @@ class LogCapture(logging.Handler):
 def _floodwait_restante_s(bot_id: int) -> int:
     until_ts = floodwait_until.get(bot_id, 0) or 0
     return max(0, int(until_ts - time.time()))
+
+def _registrar_incidente_flood(bot_id: int, descargas_session: int, batch_start_time: float, wait_s: int):
+    """Guarda telemetría de flood/timeout para el resumen final."""
+    tiempo_vivo = time.time() - batch_start_time
+    incidente = {
+        'bot': bot_id,
+        'files_before': descargas_session,
+        'time_before': tiempo_vivo,
+        'wait': wait_s
+    }
+    flood_incidents.append(incidente)
+    bot_analytics[bot_id]['floods'] += 1
+    return tiempo_vivo
 
 def generar_informe_calibracion():
     """Genera un reporte legible para ajustar parametros"""
@@ -374,12 +390,14 @@ async def worker_bot(queue, bot_token, bot_id):
 
                 except Timeout:
                     log_timing(f"   [Bot {bot_id}] ⏳ Timeout 503. Reintentando...")
+                    _registrar_incidente_flood(bot_id, descargas_session, batch_start_time, 30)
                     if down and os.path.exists(down): os.remove(down)
                     await asyncio.sleep(30)
                     await queue.put(tarea)
 
                 except RPCError as e_rpc:
                     if "503" in str(e_rpc) or "Timeout" in str(e_rpc):
+                        _registrar_incidente_flood(bot_id, descargas_session, batch_start_time, 30)
                         await asyncio.sleep(30)
                         await queue.put(tarea)
                     else:
@@ -411,22 +429,12 @@ async def worker_bot(queue, bot_token, bot_id):
             except FloodWait as e_sleep:
                 wait_s = e_sleep.value
                 
-                # --- REGISTRO CAJA NEGRA ---
-                tiempo_vivo = time.time() - batch_start_time
-                incidente = {
-                    'bot': bot_id,
-                    'files_before': descargas_session,
-                    'time_before': tiempo_vivo,
-                    'wait': wait_s
-                }
-                flood_incidents.append(incidente)
-                bot_analytics[bot_id]['floods'] += 1
-                # ---------------------------
+                _registrar_incidente_flood(bot_id, descargas_session, batch_start_time, wait_s)
 
                 floodwait_until[bot_id] = time.time() + wait_s
                 estado_bots[bot_id] = "FLOODWAIT"
                 
-                log_timing(f"   [Bot {bot_id}] 🛑 FLOOD {wait_s}s. (Hizo {descargas_session} en {tiempo_vivo:.1f}s)")
+                log_timing(f"   [Bot {bot_id}] 🛑 FLOOD {wait_s}s. (Hizo {descargas_session} en {time.time() - batch_start_time:.1f}s)")
                 
                 await asyncio.sleep(wait_s)
                 

@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+import logging
 from typing import Any
 
 import aiosqlite
@@ -8,6 +9,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi import Body
 from fastapi.templating import Jinja2Templates
 from PIL import Image
+
+# Importaciones de la base de datos
+from database import get_db, transaction, DatabaseConnectionError
 
 try:
     import torch
@@ -513,16 +517,28 @@ async def hide_duplicates(
     if not pairs:
         raise HTTPException(status_code=400, detail="Items inválidos.")
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("BEGIN IMMEDIATE;")
-        await db.executemany(
-            """
-            UPDATE videos_telegram
-            SET oculto = 2
-            WHERE chat_id = ? AND message_id = ?
-            """,
-            pairs,
+    try:
+        async with get_db() as db:
+            async with transaction(db) as cursor:
+                await cursor.executemany(
+                    """
+                    UPDATE videos_telegram
+                    SET oculto = 2
+                    WHERE chat_id = ? AND message_id = ?
+                    """,
+                    pairs,
+                )
+        return {"ok": True, "updated": len(pairs)}
+        
+    except DatabaseConnectionError as e:
+        logger.error(f"Error de conexión a la base de datos: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo conectar a la base de datos. Por favor, inténtelo de nuevo más tarde."
         )
-        await db.commit()
-
-    return {"ok": True, "updated": len(pairs)}
+    except Exception as e:
+        logger.error(f"Error al ocultar duplicados: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error interno del servidor: {str(e)}"
+        )

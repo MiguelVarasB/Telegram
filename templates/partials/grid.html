@@ -6,8 +6,19 @@
         <div class="sort-controls">
             <form method="get" action="{{ pagination.base_path }}">
                 <input type="hidden" name="page" value="{{ pagination.page }}">
-                <input type="hidden" name="per_page" value="{{ pagination.per_page }}">
                 <input type="hidden" name="direction" value="{{ pagination.direction }}">
+                <label for="per-page" style="margin-right:6px;">Videos por página:</label>
+                <input
+                    type="number"
+                    id="per-page"
+                    name="per_page"
+                    value="{{ pagination.per_page }}"
+                    min="1"
+                    max="200"
+                    step="10"
+                    style="width:90px;"
+                    onchange="this.form.submit()"
+                >
                 <label for="sort">Ordenar por:</label>
                 <select name="sort" id="sort" onchange="this.form.submit()">
                     <option value="fecha" {% if pagination.sort == 'fecha' %}selected{% endif %}>Fecha</option>

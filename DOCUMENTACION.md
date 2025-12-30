@@ -6,6 +6,7 @@
 - Modal de info de canal con botones “Indexar faltantes” y “Abrir canal”; API `/api/channel/{chat_id}/info` y `/api/channel/{chat_id}/scan`.
 - WebSocket `/ws/folder/{folder_id}` envía `init` con items para cargar en segundo plano; frontend consume y re-renderiza.
 - Instrumentación de rendimiento en frontend (performance marks) y logs de tiempo en backend (`log_timing`).
+- **Refactor media:** `routes/media.py` se dividió en `media_common.py`, `media_pages.py`, `media_stream.py` y `media_api.py`, ensamblados por `media_router.py`.
 - Nota: mantener este documento actualizado tras cada cambio relevante (backend, frontend, DB o scripts CLI).
 
 ## 1. Visión general
@@ -39,56 +40,61 @@
 
 ```
 Telegram/
-├── app.py                   # Punto de entrada principal
+├── app.py                     # Punto de entrada principal
 ├── config.py                  # Configuración centralizada
-├── run_cli.py                 # Lanzador interactivo para ejecutar scripts dentro de CLI/
-├── run_cli.bat                # Script batch para ejecutar run_cli.py
+├── run_cli.py / run_cli.bat   # Lanzador interactivo para scripts en CLI/
 ├── bot_videos.py              # Bot para manejo de videos
 ├── migrar_db.py               # Script de migración de base de datos
 ├── test.py                    # Script de pruebas
 ├── sitios_soportados.txt      # Lista de sitios soportados
 ├── iniciar_descarga_thumbs.bat # Batch para iniciar descarga de thumbnails
-├── CLI/                        # Scripts para ejecutar desde terminal (12 items)
+├── CLI/                       # Scripts para ejecutar desde terminal (~17 items)
 │   ├── descargar_dump.py
 │   ├── reenviar_videos.py
 │   ├── scan_all_channels_to_db.py
 │   ├── sincronizar_db.py
-│   └── ... (otros 8 scripts)
-├── database/                  # Módulo de base de datos + archivo SQLite (5 items)
-│   ├── __init__.py           # Exporta funciones públicas
-│   ├── connection.py         # Conexión SQLite (async) e init_db()
-│   ├── chats.py              # Operaciones de chats (async)
-│   ├── videos.py             # Operaciones de videos y mensajes (async)
-│   ├── folders.py            # Operaciones de carpetas (async)
-│   └── chats.db              # Base de datos local (DB_PATH)
+│   └── ... (otros scripts)
+├── database/                  # Módulo de base de datos + archivo SQLite (7 items)
+│   ├── __init__.py            # Exporta funciones públicas
+│   ├── connection.py          # Conexión SQLite (async) e init_db()
+│   ├── chats.py               # Operaciones de chats (async)
+│   ├── videos.py              # Operaciones de videos y mensajes (async)
+│   ├── folders.py             # Operaciones de carpetas (async)
+│   ├── connection.py.bak      # Respaldo
+│   └── chats.db               # Base de datos local (DB_PATH)
 ├── services/                  # Módulo de servicios (8 items)
-│   ├── __init__.py           # Exporta servicios públicos
-│   ├── telegram_client.py    # Cliente Pyrogram singleton
-│   ├── folder_sync.py        # Sincronización de carpetas manuales
-│   ├── video_streamer.py     # Streaming de video híbrido (Disco/RAM/Telegram)
-│   ├── memory_cache.py       # Caché en RAM de videos (buffers + metadatos)
-│   ├── disk_cache.py         # Caché inteligente en disco (LRU)
-│   ├── prefetch.py           # Pre-carga de videos a Disco/RAM
-│   └── ... (otro item)
-├── routes/                    # Módulo de rutas FastAPI (8 items)
-│   ├── __init__.py           # Exporta routers
-│   ├── home.py               # Ruta /
-│   ├── folders.py            # Rutas /folder/, /api/folder/, websocket
-│   ├── channels.py           # Ruta /channel/ (escaneo + guardado en BD)
-│   ├── media.py              # Rutas /play/, /video_stream/, /api/photo/, etc.
-│   ├── sync.py               # Ruta /sync/diario (sincronización incremental)
-│   ├── search.py             # Rutas de búsqueda
-│   └── duplicates.py         # Rutas de duplicados
+│   ├── __init__.py            # Exporta servicios públicos
+│   ├── telegram_client.py     # Cliente Pyrogram singleton
+│   ├── folder_sync.py         # Sincronización de carpetas manuales
+│   ├── video_streamer.py      # Streaming de video híbrido (Disco/RAM/Telegram)
+│   ├── memory_cache.py        # Caché en RAM de videos (buffers + metadatos)
+│   ├── disk_cache.py          # Caché inteligente en disco (LRU)
+│   ├── prefetch.py            # Pre-carga de videos a Disco/RAM
+│   └── thumb_worker_hibrido.py # Worker híbrido de thumbnails
+├── routes/                    # Módulo de rutas FastAPI (13 items)
+│   ├── __init__.py            # Exporta routers
+│   ├── home.py                # Ruta /
+│   ├── folders.py             # Rutas /folder/, /api/folder/, websocket
+│   ├── channels.py            # Ruta /channel/ (escaneo + guardado en BD)
+│   ├── media.py               # Reexporta router compuesto de media
+│   ├── media_router.py        # Incluye subrouters de media
+│   ├── media_common.py        # Helpers compartidos (cachés, semáforos)
+│   ├── media_pages.py         # Páginas /videos, /watch_later, /play
+│   ├── media_stream.py        # Streaming y descargas de video
+│   ├── media_api.py           # API de thumbnails, stats, watch_later
+│   ├── sync.py                # Ruta /sync/diario (sincronización incremental)
+│   ├── search.py              # Rutas de búsqueda
+│   └── duplicates.py          # Rutas de duplicados
 ├── utils/                     # Módulo de utilidades (5 items)
-│   ├── __init__.py           # Exporta helpers
-│   ├── helpers.py            # Funciones auxiliares
-│   ├── websocket.py          # FolderWSManager
-│   ├── media_processor.py    # Procesador multimedia (FFmpeg)
-│   └── ... (otro item)
+│   ├── __init__.py            # Exporta helpers
+│   ├── helpers.py             # Funciones auxiliares
+│   ├── websocket.py           # FolderWSManager
+│   ├── media_processor.py     # Procesador multimedia (FFmpeg)
+│   └── transcoder.py          # Transcodificador adicional
 ├── templates/                 # Plantillas frontend (14 items)
-│   ├── layout.html           # Template principal
-│   ├── mega_ui.html          # Template monolítico anterior
-│   └── partials/             # Fragmentos reutilizables
+│   ├── layout.html            # Template principal
+│   ├── mega_ui.html           # Template monolítico anterior
+│   └── partials/              # Fragmentos reutilizables
 │       ├── top_bar.html
 │       ├── content.html
 │       ├── video_modal.html
@@ -106,7 +112,7 @@ Telegram/
 │   └── smart_cache/
 ├── migrations/                # Migraciones de base de datos (1 item)
 │   └── 001_create_videos_tables.py
-├── static/                    # Archivos estáticos (3 items)
+├── static/                    # Archivos estáticos
 ├── sessions/                  # Sesiones de Telegram
 ├── downloads/                 # Descargas temporales
 └── .test/                     # Directorio de pruebas

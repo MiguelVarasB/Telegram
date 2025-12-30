@@ -209,6 +209,41 @@
         }
     }
 
+    async function toggleWatchLaterFromModal(ev) {
+        if (ev) ev.preventDefault();
+        const videoId = state.currentVideoId;
+        const card = state.currentVideoElement;
+        if (!videoId) return;
+        const current = card?.dataset.watchLater === '1';
+        const nextValue = !current;
+        try {
+            const res = await fetch(`/api/video/${encodeURIComponent(videoId)}/watch_later`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: nextValue }),
+            });
+            if (!res.ok) throw new Error(`watch_later ${res.status}`);
+            const data = await res.json();
+            const saved = data.watch_later ? '1' : '0';
+            if (card) {
+                card.dataset.watchLater = saved;
+                applyWatchLaterStateToElement(card);
+            }
+            if (dom.detailsWatchLaterPill) {
+                dom.detailsWatchLaterPill.style.display = saved === '1' ? 'block' : 'none';
+            }
+            updateWatchLaterButton();
+        } catch (err) {
+            console.error('Error al marcar ver después (modal)', err);
+            alert('No se pudo actualizar "ver más tarde". Intenta nuevamente.');
+        }
+    }
+
+    // Bind de botón en modal
+    if (dom.watchLaterButton) {
+        dom.watchLaterButton.addEventListener('click', toggleWatchLaterFromModal);
+    }
+
     function updateHideVideoButton() {
         if (!dom.hideVideoButton) return;
         if (!state.currentVideoId) {

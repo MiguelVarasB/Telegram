@@ -1,3 +1,5 @@
+
+
 <a href="{{ item.link }}" class="file-item" data-item-type="video"
    data-stream-url="{{ item.stream_url or item.link|replace('/play/', '/video_stream/', 1) }}"
    data-video-id="{{ item.video_id }}"
@@ -15,22 +17,25 @@
    data-watch-later="{% if item.watch_later %}1{% else %}0{% endif %}"
    {% if item.chat_id is defined %}data-chat-id="{{ item.chat_id }}"{% endif %}
    {% if item.message_id is defined %}data-message-id="{{ item.message_id }}"{% endif %}>
-
-    <div class="icon-box video-box">
+<button type="button"
+ class="btn-card-watch-later btn-watchlater-overlay" 
+ onclick="toggleWatchLater(event, '{{ item.video_id }}')"
+  title="Ver más tarde">
+           <i class="fa-regular fa-clock"></i>
+            
+        </button>
+<div class="icon-box video-box">
         <div class="video-hidden-indicator" title="Marcado como oculto">
             <i class="fas fa-eye-slash"></i>
-        </div>
-        <button type="button" class="btn-card-watch-later btn-watchlater-overlay" title="Ver más tarde">
-            <i class="far fa-star"></i>
-            <span>Ver después</span>
-        </button>
+</div>
+        
 
         <div class="video-loading-spinner" aria-hidden="true">
             <i class="fas fa-circle-notch fa-spin"></i>
         </div>
 
         {% if item.photo_id %}
-            <img src="/api/photo/{{ item.photo_id }}?chat_id={{ item.chat_id }}&video_id={{ item.video_id }}" class="video-thumb" loading="lazy">
+            <img src="/api/photo/{{ item.photo_id }}?chat_id={{ item.chat_id }}&video_id={{ item.video_id }}&has_thumb={{ item.has_thumb }}&dump_message_id={{ item.dump_message_id }}" class="video-thumb" loading="lazy">
         {% else %}
             <i class="fas fa-file-video file-video"></i>
         {% endif %}
@@ -56,3 +61,4 @@
         </div>
     {% endif %}
 </a>
+

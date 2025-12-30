@@ -518,3 +518,35 @@
 
     init();
 })();
+async function toggleWatchLater(e, itemId) {
+    // Evita que el click en el botón dispare el link del contenedor
+    e.preventDefault();
+    e.stopPropagation();
+
+    const card = e.currentTarget.closest('.file-item');
+    const behaviors = window.App?.behaviors;
+
+    const current = card?.dataset.watchLater === '1';
+    const nextValue = !current;
+
+    try {   
+        const res = await fetch(`/api/video/${encodeURIComponent(itemId)}/watch_later`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: nextValue }),
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`watch_later ${res.status}: ${text}`);
+        let data;
+        try { data = JSON.parse(text); } catch { data = {}; }
+        const saved = data.watch_later ? '1' : '0';
+        if (card) {
+            card.dataset.watchLater = saved;
+            behaviors?.applyWatchLaterStateToElement?.(card);
+        }
+
+    } catch (err) {
+        console.error('Error al marcar ver después', err);
+        alert('No se pudo actualizar "ver más tarde". Intenta nuevamente.');
+    }
+}

@@ -15,6 +15,7 @@ from routes import (
     folders_router,
     channels_router,
     media_router,
+    media_api_router,
     sync_router,
     search_router,
     duplicates_router,
@@ -56,6 +57,7 @@ app.include_router(home_router)
 app.include_router(folders_router)
 app.include_router(channels_router)
 app.include_router(media_router)
+app.include_router(media_api_router)
 app.include_router(sync_router)
 app.include_router(search_router)
 app.include_router(duplicates_router)
