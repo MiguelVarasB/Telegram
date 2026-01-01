@@ -3,6 +3,7 @@ import asyncio
 import aiosqlite
 import sys
 from pyrogram.errors import FloodWait
+from typing import Dict, List, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -19,9 +20,10 @@ from config import (
 from services.telegram_client import get_client
 from utils import save_image_as_webp, log_timing
 # --- CONFIGURACIÓN ---
-LIMITE = 1000  # Cantidad de videos a procesar en esta vuelta
-BATCH =   30  # Tamaño del paquete de reenvío (No subir de 20)
-SLEEP_ENVIO=2
+LIMITE = 20  # Cantidad de videos a procesar en esta vuelta
+BATCH =   30  # Tamaño del paquete de reenvío (No subir de 30)
+SLEEP_ENVIO = 5
+MAX_CHATS_CONCURRENTES = 3  # cuántos chats se procesan en paralelo
 
 async def check_database_schema():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -113,7 +115,8 @@ async def main():
         await app.start()
 
     # 3. Agrupar por chat de origen (Telegram requiere reenviar por chat)
-    lotes = {}
+    lotes: Dict[int, List[Tuple[int, int, int]]] = {}
+
     for vid in pendientes:
         chat_id = vid[1]
         if chat_id not in lotes: lotes[chat_id] = []
@@ -121,61 +124,72 @@ async def main():
 
     total_ok = 0
 
-    try:
-        # 4. Procesar reenvíos
-        for chat_origin, videos in lotes.items():
-            chat_bloqueado = False
-            # Dividir en sub-lotes de 20
-            for i in range(0, len(videos), BATCH):
-                chunk = videos[i : i + BATCH]
-                msg_ids = [v[2] for v in chunk] # Solo los IDs de los mensajes
+    async def procesar_chat(chat_origin: int, videos: List[Tuple[int, int, int]]):
+        nonlocal total_ok
+        chat_bloqueado = False
 
-                try:
-                    print(f"   ➡️ Reenviando {len(chunk)} videos del chat {chat_origin}...", end=" ")
-                    
-                    # REENVÍO
-                    nuevos_msgs = await app.forward_messages(
-                        chat_id=CACHE_DUMP_VIDEOS_CHANNEL_ID,
-                        from_chat_id=chat_origin,
-                        message_ids=msg_ids
-                    )
-                    
-                    if not isinstance(nuevos_msgs, list):
-                        nuevos_msgs = [nuevos_msgs]
+        for i in range(0, len(videos), BATCH):
+            chunk = videos[i : i + BATCH]
+            msg_ids = [v[2] for v in chunk]  # Solo los IDs de los mensajes
 
-                    # ACTUALIZAR BD
-                    async with aiosqlite.connect(DB_PATH) as db:
-                        for j, msg in enumerate(nuevos_msgs):
-                            if msg:
-                                # Guardamos la referencia: video_id -> nuevo_message_id
-                                vid_id_local = chunk[j][0]
-                                await db.execute(
-                                    "UPDATE videos_telegram SET dump_message_id = ? WHERE id = ?", 
-                                    (msg.id, vid_id_local)
-                                )
-                        await db.commit()
-                    
-                    total_ok += len(nuevos_msgs)
-                    log_timing("✅")
-                    await asyncio.sleep(SLEEP_ENVIO) # Pausa de seguridad
+            try:
+                print(f"   ➡️ Reenviando {len(chunk)} videos del chat {chat_origin}...", end=" ")
 
-                except FloodWait as e:
-                    log_timing(f"\n⏳ FloodWait: Esperando {e.value} segundos...")
-                    await asyncio.sleep(e.value)
-                except Exception as e:
-                    err_id = getattr(e, "ID", "")
-                    err_txt = str(e)
-                    if err_id == "CHAT_FORWARDS_RESTRICTED" or "CHAT_FORWARDS_RESTRICTED" in err_txt:
-                        log_timing(f"\n❌ Error: {e}")
-                        await marcar_chat_fallido(chat_origin, "CHAT_FORWARDS_RESTRICTED")
-                        chat_bloqueado = True
-                        break
+                # REENVÍO
+                nuevos_msgs = await app.forward_messages(
+                    chat_id=CACHE_DUMP_VIDEOS_CHANNEL_ID,
+                    from_chat_id=chat_origin,
+                    message_ids=msg_ids
+                )
+
+                if not isinstance(nuevos_msgs, list):
+                    nuevos_msgs = [nuevos_msgs]
+
+                # ACTUALIZAR BD
+                async with aiosqlite.connect(DB_PATH) as db:
+                    for j, msg in enumerate(nuevos_msgs):
+                        if msg:
+                            # Guardamos la referencia: video_id -> nuevo_message_id
+                            vid_id_local = chunk[j][0]
+                            await db.execute(
+                                "UPDATE videos_telegram SET dump_message_id = ? WHERE id = ?", 
+                                (msg.id, vid_id_local)
+                            )
+                    await db.commit()
+
+                total_ok += len(nuevos_msgs)
+                log_timing("✅")
+                await asyncio.sleep(SLEEP_ENVIO)  # Pausa de seguridad
+
+            except FloodWait as e:
+                log_timing(f"\n⏳ FloodWait: Esperando {e.value} segundos...")
+                await asyncio.sleep(e.value)
+            except Exception as e:
+                err_id = getattr(e, "ID", "")
+                err_txt = str(e)
+                if err_id == "CHAT_FORWARDS_RESTRICTED" or "CHAT_FORWARDS_RESTRICTED" in err_txt:
                     log_timing(f"\n❌ Error: {e}")
+                    await marcar_chat_fallido(chat_origin, "CHAT_FORWARDS_RESTRICTED")
+                    chat_bloqueado = True
+                    break
+                log_timing(f"\n❌ Error: {e}")
 
-            if chat_bloqueado:
-                continue
+        return chat_bloqueado
+
+    try:
+        sem = asyncio.Semaphore(MAX_CHATS_CONCURRENTES)
+
+        async def worker(chat_origin: int, videos: List[Tuple[int, int, int]]):
+            async with sem:
+                bloqueado = await procesar_chat(chat_origin, videos)
+                return bloqueado
+
+        tareas = [asyncio.create_task(worker(chat_origin, videos)) for chat_origin, videos in lotes.items()]
+        resultados = await asyncio.gather(*tareas)
+        # Si algún chat se bloqueó, ya quedó marcado en DB; no se necesita más manejo
     finally:
         await app.stop()
+
     log_timing(f"\n🏁 FIN. Total reenviados: {total_ok}")
 
     return {

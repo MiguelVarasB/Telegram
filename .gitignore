@@ -4,7 +4,7 @@ sessions/
 downloads/
 dumps/
 __pycache__/
-*.db*
+*.db
 *.db-shm
 *.db-wal
 *.rar

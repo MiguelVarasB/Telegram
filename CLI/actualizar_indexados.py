@@ -17,6 +17,10 @@ def main():
     conn = sqlite3.connect(db_path)
     try:
         cur = conn.cursor()
+        # Resetear indexados a 0 antes de recalcular
+        cur.execute("UPDATE chat_video_counts SET indexados = 0")
+        conn.commit()
+
         # Asegurar columna indexados (por si la migración aún no corrió)
         cur.execute("PRAGMA table_info(chat_video_counts)")
         cols = [row[1] for row in cur.fetchall()]
@@ -36,7 +40,7 @@ def main():
             if chat_id not in counts:
                 updates.append((0, chat_id))
 
-        cur.executemany("UPDATE chat_video_counts SET indexados = ? WHERE chat_id = ?", updates)
+        cur.executemany("UPDATE chat_video_counts SET duplicados = 0, indexados = ? WHERE chat_id = ?", updates)
         conn.commit()
         print(f"Actualizados {len(updates)} registros en chat_video_counts.indexados")
     finally:
