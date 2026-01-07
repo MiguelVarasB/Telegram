@@ -12,4 +12,6 @@ database/chats.db-shm
 downloads/.bk/5490529645_2083.json
 .env
 *.sqlite
-*.db
+
+# --- AGREGA ESTO PARA LA VELOCIDAD ---
+venv/
