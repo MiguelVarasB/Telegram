@@ -12,12 +12,13 @@ from fastapi.responses import JSONResponse
 from pyrogram.raw.functions.messages import GetDialogs
 from pyrogram.raw.types import InputPeerEmpty, PeerUser, PeerChat, PeerChannel
 
-from config import TEMPLATES_DIR, JSON_FOLDER, MAIN_TEMPLATE
+from config import TEMPLATES_DIR, JSON_FOLDER, MAIN_TEMPLATE, MQTT_ENABLED
 from services import get_client, refresh_manual_folder_from_telegram
 from database import db_add_chat_folder, get_folder_items_from_db
 from database.folders import get_all_chats_with_counts
 from utils import serialize_pyrogram, json_serial, log_timing
 from utils.websocket import ws_manager
+from utils.mqtt_manager import get_mqtt_manager
 from .channels import scan_channel_background
 
 router = APIRouter()
@@ -147,11 +148,23 @@ async def api_folder(folder_id: int):
 # ---- Escaneo en lote con control de concurrencia y progreso ----
 
 async def _broadcast_progress(payload: dict, folder_id: int | None):
-    """Envía un mensaje de progreso, filtrado por carpeta si se pasa."""
+    """Envía un mensaje de progreso vía WebSocket y MQTT."""
     try:
         await ws_manager.broadcast_event(payload, folder_id=folder_id)
     except Exception:
         pass
+    
+    if MQTT_ENABLED:
+        mqtt_mgr = get_mqtt_manager()
+        if mqtt_mgr and mqtt_mgr.is_connected():
+            try:
+                if folder_id is not None:
+                    topic = f"bot/folder/{folder_id}/scan"
+                else:
+                    topic = "bot/folder/scan"
+                mqtt_mgr.publish(topic, payload, qos=1)
+            except Exception:
+                pass
 
 
 async def _scan_single(chat_id: int, job_id: str, folder_id: int | None, counters: dict):

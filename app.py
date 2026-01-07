@@ -9,9 +9,13 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from config import ensure_directories, HOST, PORT, LOG_LEVEL, PYRO_LOG_LEVEL, UVICORN_LOG_LEVEL
+from config import (
+    ensure_directories, HOST, PORT, LOG_LEVEL, PYRO_LOG_LEVEL, UVICORN_LOG_LEVEL,
+    MQTT_ENABLED, MQTT_BROKER, MQTT_PORT, MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD
+)
 from database import init_db
 from services import start_client, stop_client, warmup_cache
+from utils import init_mqtt_manager, get_mqtt_manager
 from routes import (
     home_router,
     folders_router,
@@ -46,6 +50,24 @@ async def lifespan(app: FastAPI):
     # Es crucial usar 'await' aquí porque cambiamos init_db a async
     await init_db() 
     
+    # --- INICIALIZACIÓN DE MQTT ---
+    if MQTT_ENABLED:
+        print(f" Conectando al broker MQTT en {MQTT_BROKER}:{MQTT_PORT}...")
+        mqtt_mgr = init_mqtt_manager(
+            broker=MQTT_BROKER,
+            port=MQTT_PORT,
+            client_id=MQTT_CLIENT_ID,
+            username=MQTT_USERNAME,
+            password=MQTT_PASSWORD,
+        )
+        connected = await mqtt_mgr.connect()
+        if connected:
+            print(" MQTT Manager inicializado correctamente")
+        else:
+            print(" MQTT Manager no pudo conectarse, continuando sin notificaciones MQTT")
+    else:
+        print(" MQTT deshabilitado en configuración")
+    
     # Usamos una sesión de Telegram separada para el servidor para evitar locks
     await start_client(use_server_session=True)
     
@@ -55,6 +77,12 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     await stop_client()
+    
+    # Desconectar MQTT
+    if MQTT_ENABLED:
+        mqtt_mgr = get_mqtt_manager()
+        if mqtt_mgr:
+            await mqtt_mgr.disconnect()
 
 
 # Crear aplicación FastAPI

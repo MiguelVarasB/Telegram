@@ -12,6 +12,7 @@ from .helpers import (
     log_timing
 )
 from .websocket import FolderWSManager, ws_manager
+from .mqtt_manager import MQTTManager, get_mqtt_manager, init_mqtt_manager
 
 __all__ = [
     "obtener_id_limpio",
@@ -23,5 +24,8 @@ __all__ = [
     "force_resolve_peer",
     "FolderWSManager",
     "ws_manager",
-    "log_timing"
+    "log_timing",
+    "MQTTManager",
+    "get_mqtt_manager",
+    "init_mqtt_manager",
 ]

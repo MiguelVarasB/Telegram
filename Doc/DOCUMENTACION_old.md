@@ -1,3 +1,5 @@
+## DOCUMENTACION ANTIGUA
+
 # Documentación del proyecto MegaTelegram Local
 
 ## Cambios recientes (dic 2025)

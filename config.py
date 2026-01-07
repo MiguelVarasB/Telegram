@@ -122,6 +122,15 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "WARNING").upper()
 UVICORN_LOG_LEVEL = os.getenv("UVICORN_LOG_LEVEL", LOG_LEVEL).upper()
 PYRO_LOG_LEVEL = os.getenv("PYRO_LOG_LEVEL", "ERROR").upper()
 
+# --- MQTT BROKER ---
+MQTT_ENABLED = os.getenv("MQTT_ENABLED", "1").lower() not in ("0", "false", "no", "off")
+MQTT_BROKER = os.getenv("MQTT_BROKER", "127.0.0.2")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_CLIENT_ID = os.getenv("MQTT_CLIENT_ID", "megatelegram_server")
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", None)
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", None)
+MQTT_KEEPALIVE = int(os.getenv("MQTT_KEEPALIVE", "60"))
+
 # --- FFMPEG / SPRITES ---
 # Dimensiones solicitadas
 SPRITE_COLS = 5

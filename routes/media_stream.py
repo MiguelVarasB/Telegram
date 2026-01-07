@@ -6,9 +6,10 @@ import aiofiles
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 
-from config import DUMP_FOLDER, DB_PATH, SMART_CACHE_ENABLED
+from config import DUMP_FOLDER, DB_PATH, SMART_CACHE_ENABLED, MQTT_ENABLED
 from services import get_client, TelegramVideoSender, prefetch_channel_videos_to_ram, background_thumb_downloader
 from utils import save_image_as_webp
+from utils.mqtt_manager import get_mqtt_manager
 from .media_common import get_video_info_from_db
 
 from fastapi import BackgroundTasks
@@ -109,6 +110,20 @@ async def _background_video_download(chat_id: int, message_id: int, video_id: st
                     "updated_at": now,
                 }
             )
+            
+            if MQTT_ENABLED:
+                mqtt_mgr = get_mqtt_manager()
+                if mqtt_mgr and mqtt_mgr.is_connected():
+                    mqtt_mgr.publish_download_progress(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        video_id=video_id,
+                        status="downloading",
+                        current=current,
+                        total=total,
+                        speed=speed,
+                        eta=eta,
+                    )
 
         downloaded = await client.download_media(
             media, file_name=file_path, progress=_progress
@@ -129,6 +144,20 @@ async def _background_video_download(chat_id: int, message_id: int, video_id: st
                     "finished_at": now,
                 }
             )
+            
+            if MQTT_ENABLED:
+                mqtt_mgr = get_mqtt_manager()
+                if mqtt_mgr and mqtt_mgr.is_connected():
+                    mqtt_mgr.publish_download_progress(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        video_id=video_id,
+                        status="completed",
+                        current=size_now,
+                        total=size_now,
+                        speed=0,
+                        eta=0,
+                    )
             # Usamos aiosqlite para la actualización final
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute(
