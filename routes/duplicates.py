@@ -5,8 +5,7 @@ import logging
 from typing import Any
 
 import aiosqlite
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi import Body
+from fastapi import APIRouter, HTTPException, Query, Request, Body
 from fastapi.templating import Jinja2Templates
 from PIL import Image
 
@@ -28,7 +27,7 @@ from utils import convertir_tamano
 
 router = APIRouter()
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
-
+logger = logging.getLogger(__name__)
 
 _name_ext_re = re.compile(r"\.[a-z0-9]{1,6}$", re.IGNORECASE)
 _name_clean_re = re.compile(r"[^a-z0-9 ]+", re.IGNORECASE)
@@ -179,7 +178,6 @@ def _cluster_by_similarity(items: list[dict[str, Any]], similarity_threshold: fl
 
 
 async def _ensure_thumb_bytes_column(db: aiosqlite.Connection) -> None:
-    """Garantiza que exista la columna thumb_bytes; intenta en la misma conexión."""
     async with db.execute("PRAGMA table_info(videos_telegram)") as cursor:
         cols = [row[1] async for row in cursor]
     if "thumb_bytes" in cols:
@@ -188,7 +186,18 @@ async def _ensure_thumb_bytes_column(db: aiosqlite.Connection) -> None:
         await db.execute("ALTER TABLE videos_telegram ADD COLUMN thumb_bytes INTEGER;")
         await db.commit()
     except Exception:
-        # si ya existe o falla, ignoramos; se validará de nuevo en table_info
+        pass
+
+
+async def _ensure_thumb_phash_column(db: aiosqlite.Connection) -> None:
+    async with db.execute("PRAGMA table_info(videos_telegram)") as cursor:
+        cols = [row[1] async for row in cursor]
+    if "thumb_phash" in cols:
+        return
+    try:
+        await db.execute("ALTER TABLE videos_telegram ADD COLUMN thumb_phash TEXT;")
+        await db.commit()
+    except Exception:
         pass
 
 
@@ -215,330 +224,235 @@ async def api_duplicates(
     by_duration: bool = Query(True),
     by_video_size: bool = Query(True),
     by_thumb_size: bool = Query(False),
+    by_thumb_phash: bool = Query(False),
     by_similarity: bool = Query(False),
+    by_channel: bool = Query(True),
     duration_tol: int = Query(0, ge=0, le=60),
     size_tol_bytes: int = Query(0, ge=0, le=50_000_000),
     thumb_mode: str = Query("wh"),
     similarity_threshold: float = Query(0.92, ge=0.5, le=0.99),
-    limit: int = Query(50_000, ge=1, le=200_000),
+    limit: int = Query(100, ge=1, le=200_000),
     min_group_size: int = Query(2, ge=2, le=50),
 ):
-    if not (by_name or by_duration or by_video_size or by_thumb_size or by_similarity):
+    if not any([by_name, by_duration, by_video_size, by_thumb_size, by_similarity, by_thumb_phash, by_channel]):
         by_name = True
 
-    thumb_mode = thumb_mode if thumb_mode in ("wh", "bytes") else "wh"
+    thumb_mode = thumb_mode if thumb_mode in ("wh", "bytes", "sim", "phash") else "wh"
     device = None
     if by_similarity:
         if torch is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Torch/torchvision no están disponibles para semejanza.",
-            )
+            raise HTTPException(status_code=503, detail="Torch no disponible.")
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # --- Filtros “duros” en SQL (etapa 1)
+    # --- Filtros base SQL ---
     where_clauses = ["oculto = 0"]
-    if by_thumb_size or by_similarity:
-        where_clauses.append("has_thumb = 1")
+    if by_thumb_size or by_similarity or by_thumb_phash:
+        where_clauses.append("has_thumb > 0")
     where_sql = "WHERE " + " AND ".join(where_clauses)
 
     dur_bucket = max(1, duration_tol) if duration_tol > 0 else None
     size_bucket = max(1, size_tol_bytes) if size_tol_bytes > 0 else None
 
-    name_key_expr = "LOWER(COALESCE(nombre, ''))" if by_name else "NULL"
+    # Expresiones de clave
+    name_key_expr = "LOWER(COALESCE(nombre, ''))"
+    channel_key_expr = "CAST(vt.chat_id AS INT)"
     dur_key_expr = (
         f"(CAST(COALESCE(duracion,0) AS INT)/{dur_bucket})*{dur_bucket}"
-        if by_duration and dur_bucket
-        else "CAST(COALESCE(duracion,0) AS INT)" if by_duration else "NULL"
+        if duration_tol > 0 else "CAST(COALESCE(duracion,0) AS INT)"
     )
     size_key_expr = (
         f"(CAST(COALESCE(tamano_bytes,0) AS INT)/{size_bucket})*{size_bucket}"
-        if by_video_size and size_bucket
-        else "CAST(COALESCE(tamano_bytes,0) AS INT)" if by_video_size else "NULL"
+        if size_tol_bytes > 0 else "CAST(COALESCE(tamano_bytes,0) AS INT)"
     )
 
-    partition_fields = [
-        expr for expr in (by_name and name_key_expr, by_duration and dur_key_expr, by_video_size and size_key_expr) if expr
-    ]
-    window_count = (
-        f"COUNT(*) OVER (PARTITION BY {', '.join(partition_fields)})"
-        if partition_fields
-        else "COUNT(*) OVER ()"
-    )
+    # 1. Definimos mapeo de expresiones y sus alias para el CTE
+    potential_keys = []
+    if by_name: potential_keys.append((name_key_expr, "key_name"))
+    if by_duration: potential_keys.append((dur_key_expr, "key_dur"))
+    if by_video_size: potential_keys.append((size_key_expr, "key_size"))
+    if by_channel: potential_keys.append((channel_key_expr, "key_channel"))
+
+    # Construcción dinámica de SELECT, GROUP BY y JOIN
+    cte_select_fields = ", ".join([f"{expr} AS {alias}" for expr, alias in potential_keys])
+    cte_group_fields = ", ".join([alias for _, alias in potential_keys])
+    join_conditions = " AND ".join([f"({expr} IS gc.{alias})" for expr, alias in potential_keys])
 
     query_sql = f"""
-        WITH base AS (
-            SELECT
-                chat_id, message_id, nombre, tamano_bytes, duracion,
-                file_unique_id, file_id, has_thumb, fecha_mensaje, thumb_bytes,
-                {name_key_expr} AS key_name,
-                {dur_key_expr} AS key_dur,
-                {size_key_expr} AS key_size,
-                {window_count} AS grp_count
-            FROM videos_telegram
+        WITH grupos_candidatos AS (
+            SELECT {cte_select_fields}
+            FROM videos_telegram vt
             {where_sql}
+            GROUP BY {cte_group_fields}
+            HAVING COUNT(*) >= ?
+            ORDER BY COUNT(*) DESC
+            LIMIT ? 
         )
-        SELECT chat_id, message_id, nombre, tamano_bytes, duracion,
-               file_unique_id, file_id, has_thumb, fecha_mensaje,
-               thumb_bytes,
-               key_name, key_dur, key_size
-        FROM base
-        WHERE grp_count >= ?
-        ORDER BY grp_count DESC, fecha_mensaje DESC, message_id DESC
-        LIMIT ?
+        SELECT 
+            vt.chat_id, vt.message_id, vt.nombre, vt.tamano_bytes, vt.duracion,
+            vt.file_unique_id, vt.file_id, vt.has_thumb, vt.fecha_mensaje,
+            vt.thumb_bytes, vt.thumb_phash,
+            c.name AS chat_name, c.username AS chat_username,
+            {name_key_expr if by_name else 'NULL'} AS key_name,
+            {dur_key_expr if by_duration else 'NULL'} AS key_dur,
+            {size_key_expr if by_video_size else 'NULL'} AS key_size
+        FROM videos_telegram vt
+        JOIN grupos_candidatos gc ON {join_conditions}
+        LEFT JOIN chats c ON c.chat_id = vt.chat_id
+        {where_sql}
+        ORDER BY vt.tamano_bytes DESC, vt.fecha_mensaje DESC
     """
-    print (query_sql)
-    print (f"Limite: {limit}")
+
     async with aiosqlite.connect(DB_PATH) as db:
         await _ensure_thumb_bytes_column(db)
+        await _ensure_thumb_phash_column(db)
         db.row_factory = aiosqlite.Row
         try:
-            async with db.execute(
-                query_sql,
-                (min_group_size, limit),
-            ) as cursor:
+            async with db.execute(query_sql, (min_group_size, limit)) as cursor:
                 rows = await cursor.fetchall()
-               
         except sqlite3.OperationalError as e:
-            if "thumb_bytes" in str(e):
-                await _ensure_thumb_bytes_column(db)
-                async with db.execute(
-                    query_sql,
-                    (min_group_size, limit),
-                ) as cursor:
-                    rows = await cursor.fetchall()
-            else:
-                raise
+            logger.error(f"Error SQL: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     rows = rows or []
-    print (f"cantidad: {len(rows)}")
-    # Conteo de mensajes asociados por video_id (para mostrar en la tarjeta)
-    video_ids = {
-        (r["file_unique_id"] or "").strip()
-        for r in rows
-        if (r["file_unique_id"] or "").strip()
-    }
+    
+    # --- Procesamiento de Mensajes Asociados ---
+    video_ids = {(r["file_unique_id"] or "").strip() for r in rows if r["file_unique_id"]}
     msg_counts: dict[str, int] = {}
     if video_ids:
         placeholders = ",".join("?" for _ in video_ids)
-        sql = f"""
-            SELECT video_id, COUNT(*) AS total
-            FROM video_messages
-            WHERE video_id IN ({placeholders})
-            GROUP BY video_id
-        """
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(sql, tuple(video_ids)) as cursor:
+            async with db.execute(f"SELECT video_id, COUNT(*) FROM video_messages WHERE video_id IN ({placeholders}) GROUP BY video_id", tuple(video_ids)) as cursor:
                 async for row in cursor:
-                    vid = (row[0] or "").strip()
-                    msg_counts[vid] = int(row[1] or 0)
+                    msg_counts[row[0].strip()] = row[1]
 
-    similarity_clusters: dict[int, int] = {}
-    if by_similarity:
-        sim_items: list[dict[str, Any]] = []
-        for row_idx, r in enumerate(rows):
-            chat_id = int(r["chat_id"])
-            video_id = (r["file_unique_id"] or "").strip()
-            thumb_path = os.path.join(THUMB_FOLDER, str(chat_id), f"{video_id}.webp")
-            if not os.path.exists(thumb_path):
-                continue
-            sim_items.append(
-                {
-                    "row_idx": row_idx,
-                    "thumb_path": thumb_path,
-                }
-            )
-
+    # --- Semejanza (GPU/CPU) ---
+    similarity_clusters = {}
+    if by_similarity and rows:
+        sim_items = []
+        for idx, r in enumerate(rows):
+            path = os.path.join(THUMB_FOLDER, str(r["chat_id"]), f"{r['file_unique_id']}.webp")
+            if os.path.exists(path):
+                sim_items.append({"row_idx": idx, "thumb_path": path})
         if sim_items:
             similarity_clusters = _cluster_by_similarity(sim_items, similarity_threshold, device)
 
-    groups: dict[tuple[Any, ...], dict[str, Any]] = {}
-
-    for row_idx, r in enumerate(rows):
+    # --- Agrupamiento Final ---
+    groups: dict[tuple, dict] = {}
+    for idx, r in enumerate(rows):
         chat_id = int(r["chat_id"])
-        message_id = int(r["message_id"])
-        file_unique_id=(r["file_unique_id"])
         video_id = (r["file_unique_id"] or "").strip()
-        file_id = (r["file_id"] or "").strip()
-        nombre = r["nombre"]
-
-        dur_raw = r["duracion"]
-        try:
-            dur = int(round(float(dur_raw or 0)))
-        except Exception:
-            dur = 0
-
-        size_raw = r["tamano_bytes"]
-        try:
-            size_bytes = int(size_raw or 0)
-        except Exception:
-            size_bytes = 0
-
-        # Claves calculadas en SQL (etapa 1). Si no se usó la clave, calculamos aquí.
-        name_norm = _normalize_name(nombre) if by_name else None
-        name_key: Any = r["key_name"] if by_name else None
-        if by_name and not name_key:
-            name_key = ("empty", chat_id, message_id)
-
-        dur_key: int | None = None
-        if by_duration:
-            if r["key_dur"] is not None:
-                dur_key = int(r["key_dur"])
-            elif duration_tol and duration_tol > 0:
-                bucket = max(1, duration_tol)
-                dur_key = int((dur // bucket) * bucket)
-            else:
-                dur_key = dur
-
-        size_key: int | None = None
-        if by_video_size:
-            if r["key_size"] is not None:
-                size_key = int(r["key_size"])
-            elif size_tol_bytes and size_tol_bytes > 0:
-                bucket = max(1, size_tol_bytes)
-                size_key = int((size_bytes // bucket) * bucket)
-            else:
-                size_key = size_bytes
-
-        thumb_key: Any = None
-        thumb_info: dict[str, Any] | None = None
-        if by_thumb_size:
-            if thumb_mode == "bytes":
-                thumb_bytes = r["thumb_bytes"] if "thumb_bytes" in r.keys() else None
-                thumb_key = thumb_bytes
-                thumb_info = {"exists": thumb_bytes is not None, "bytes": thumb_bytes, "w": None, "h": None}
-            else:
-                thumb_info = _thumb_info(chat_id, video_id, thumb_mode)
-                if not thumb_info.get("exists"):
-                    thumb_key = ("missing", chat_id, message_id)
-                else:
-                    thumb_key = (thumb_info.get("w"), thumb_info.get("h"))
-
-        sim_key: Any = None
-        if by_similarity:
-            sim_key = similarity_clusters.get(row_idx)
-
-        key_parts: list[Any] = []
-        key_view: dict[str, Any] = {}
-
+        
+        # Generar clave de grupo
+        key_parts = []
+        key_view = {}
+        
         if by_name:
-            key_parts.append(name_key)
-            key_view["name"] = name_norm
+            key_parts.append(r["key_name"])
+            key_view["name"] = r["key_name"]
         if by_duration:
-            key_parts.append(dur_key)
-            key_view["duration"] = dur_key
+            key_parts.append(r["key_dur"])
+            key_view["duration"] = r["key_dur"]
         if by_video_size:
-            key_parts.append(size_key)
-            key_view["video_size"] = size_key
-        if by_thumb_size:
-            key_parts.append(thumb_key)
-            key_view["thumb"] = thumb_key
+            key_parts.append(r["key_size"])
+            key_view["video_size"] = r["key_size"]
+        if by_channel:
+            key_parts.append(chat_id)
+            key_view["channel"] = chat_id
+            
+        # Filtros extra de Python (Phash / Semejanza)
+        if by_thumb_phash:
+            phash = (r["thumb_phash"] or "").strip()
+            key_parts.append(phash or f"no_phash_{idx}")
+            key_view["phash"] = phash
         if by_similarity:
-            key_parts.append(sim_key)
-            key_view["similarity_cluster"] = sim_key
-            key_view["threshold"] = similarity_threshold
+            sim_id = similarity_clusters.get(idx)
+            key_parts.append(sim_id if sim_id is not None else f"no_sim_{idx}")
+            key_view["sim_cluster"] = sim_id
 
-        key = tuple(key_parts)
-
-        if key not in groups:
-            groups[key] = {"key": key_view, "items": []}
+        group_key = tuple(key_parts)
+        if group_key not in groups:
+            groups[group_key] = {"key": key_view, "items": []}
 
         item = {
             "chat_id": chat_id,
-            "message_id": message_id,
+            "message_id": r["message_id"],
             "video_id": video_id,
-            "file_unique_id":file_unique_id,
-            "file_id": file_id,
+            "file_id": r["file_id"],
             "messages_count": msg_counts.get(video_id, 0),
-            "nombre": nombre or f"Video {message_id}",
-            "nombre_norm": name_norm,
-            "duracion": dur,
-            "tamano_bytes": size_bytes,
-            "tamano_text": convertir_tamano(size_bytes),
+            "nombre": r["nombre"] or f"Video {r['message_id']}",
+            "duracion": r["duracion"],
+            "tamano_bytes": r["tamano_bytes"],
+            "tamano_text": convertir_tamano(r["tamano_bytes"]),
             "fecha_mensaje": r["fecha_mensaje"],
-            "has_thumb": int(r["has_thumb"] or 0),
-            "thumb": thumb_info,
-            "play_link": f"/play/{chat_id}/{message_id}",
-            "thumb_url": (
-                f"/api/photo/{file_id}?chat_id={chat_id}&video_id={video_id}" if file_id else None
-            ),
+            "has_thumb": r["has_thumb"],
+            "chat_name": r["chat_name"],
+            "chat_username": r["chat_username"],
+            "play_link": f"/play/{chat_id}/{r['message_id']}",
+            "thumb_url": f"/api/photo/{r['file_id']}?chat_id={chat_id}&video_id={video_id}" if r["file_id"] else None,
         }
-        groups[key]["items"].append(item)
+        groups[group_key]["items"].append(item)
 
-    out_groups: list[dict[str, Any]] = []
-    for _, g in groups.items():
-        items = g.get("items") or []
-        if len(items) >= min_group_size:
-            out_groups.append(g)
+    # Ordenar items dentro de cada grupo por cantidad de mensajes y fecha
+    for g in groups.values():
+        def _key(it: dict[str, Any]):
+            try:
+                msgs = int(it.get("messages_count") or 0)
+            except Exception:
+                msgs = 0
+            try:
+                fecha = int(it.get("fecha_mensaje") or 0)
+            except Exception:
+                fecha = 0
+            try:
+                mid = int(it.get("message_id") or 0)
+            except Exception:
+                mid = 0
+            return (msgs, fecha, mid)
 
-    out_groups.sort(key=lambda x: len(x.get("items") or []), reverse=True)
-    print(f"Grupos generados {len(out_groups)}")
+        g["items"].sort(key=_key, reverse=True)
+
+    # Filtrar por tamaño mínimo de grupo y ordenarlos
+    out_groups = [g for g in groups.values() if len(g["items"]) >= min_group_size]
+    for g in out_groups:
+        msg_counts_group = [int(it.get("messages_count") or 0) for it in g["items"]]
+        fechas_group = [it.get("fecha_mensaje") or 0 for it in g["items"]]
+        mids_group = [int(it.get("message_id") or 0) for it in g["items"]]
+        g["total_msgs"] = sum(msg_counts_group)
+        g["max_msgs"] = max(msg_counts_group) if msg_counts_group else 0
+        g["latest_fecha"] = max(fechas_group) if fechas_group else 0
+        g["latest_mid"] = max(mids_group) if mids_group else 0
+
+    out_groups.sort(
+        key=lambda g: (
+            g.get("max_msgs", 0),
+            g.get("total_msgs", 0),
+            len(g["items"]),
+            g.get("latest_fecha", 0),
+            g.get("latest_mid", 0),
+        ),
+        reverse=True,
+    )
+
     return {
-        "criteria": {
-            "by_name": by_name,
-            "by_duration": by_duration,
-            "by_video_size": by_video_size,
-            "by_thumb_size": by_thumb_size,
-            "duration_tol": duration_tol,
-            "size_tol_bytes": size_tol_bytes,
-            "thumb_mode": thumb_mode,
-            "limit": limit,
-            "min_group_size": min_group_size,
-        },
-        "scanned": len(rows or []),
-        "sql": {
-            "query": query_sql,
-            "params": (limit, min_group_size, limit),
-        },
+        "scanned": len(rows),
         "groups": out_groups,
-        "groups_count": len(out_groups),
+        "groups_count": len(out_groups)
     }
 
 
 @router.post("/api/duplicates/hide")
-async def hide_duplicates(
-    payload: dict = Body(...),
-):
-    items = payload.get("items") if isinstance(payload, dict) else None
+async def hide_duplicates(payload: dict = Body(...)):
+    items = payload.get("items")
     if not isinstance(items, list) or not items:
-        raise HTTPException(status_code=400, detail="Se requiere al menos un item.")
-
-    pairs: list[tuple[int, int]] = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        try:
-            chat_id = int(it.get("chat_id"))
-            message_id = int(it.get("message_id"))
-        except Exception:
-            continue
-        pairs.append((chat_id, message_id))
-
-    if not pairs:
         raise HTTPException(status_code=400, detail="Items inválidos.")
 
+    pairs = [(int(it["chat_id"]), int(it["message_id"])) for it in items if "chat_id" in it and "message_id" in it]
+    
     try:
         async with get_db() as db:
             async with transaction(db) as cursor:
-                await cursor.executemany(
-                    """
-                    UPDATE videos_telegram
-                    SET oculto = 2
-                    WHERE chat_id = ? AND message_id = ?
-                    """,
-                    pairs,
-                )
+                await cursor.executemany("UPDATE videos_telegram SET oculto = 2 WHERE chat_id = ? AND message_id = ?", pairs)
         return {"ok": True, "updated": len(pairs)}
-        
-    except DatabaseConnectionError as e:
-        logger.error(f"Error de conexión a la base de datos: {e}")
-        raise HTTPException(
-            status_code=503,
-            detail="No se pudo conectar a la base de datos. Por favor, inténtelo de nuevo más tarde."
-        )
     except Exception as e:
-        logger.error(f"Error al ocultar duplicados: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error interno del servidor: {str(e)}"
-        )
+        logger.error(f"Error hide: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

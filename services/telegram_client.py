@@ -6,7 +6,14 @@ import os
 import shutil
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, SessionRevoked
-from config import API_ID, API_HASH, SESSION_NAME, SESSION_NAME_SERVER, FOLDER_SESSIONS
+from config import (
+    API_ID,
+    API_HASH,
+    SESSION_NAME,
+    SESSION_NAME_CLI,
+    SESSION_NAME_SERVER,
+    FOLDER_SESSIONS,
+)
 
 # Cliente en modo pasivo (no_updates=True) para evitar errores de PeerInvalid
 # Permitimos múltiples instancias (p. ej., un clon para CLI) cacheadas por ruta.
@@ -59,11 +66,9 @@ def get_client(use_server_session: bool = False, clone_for_cli: bool = False) ->
     os.makedirs(FOLDER_SESSIONS, exist_ok=True)
 
     if clone_for_cli:
-        # Ej.: base "mi_sesion_premium" -> "mi_sesion_premium_cli"
-        base_name = SESSION_NAME
-        clone_name = f"{SESSION_NAME}_cli"
-        session_path = _copy_session_files(base_name, clone_name)
-        session_name = clone_name
+        # Usa una sesión dedicada para CLI para evitar locks con el server
+        session_name = SESSION_NAME_CLI
+        session_path = os.path.join(FOLDER_SESSIONS, session_name)
     else:
         session_name = SESSION_NAME_SERVER if use_server_session else SESSION_NAME
         session_path = os.path.join(FOLDER_SESSIONS, session_name)

@@ -2,7 +2,7 @@
 Precalcula y guarda el tamaño en bytes de los thumbs (videos_telegram).
 
 - Crea la columna thumb_bytes si no existe.
-- Procesa thumbs con has_thumb = 1, ordenados como en duplicados
+- Procesa thumbs con has_thumb > 0, ordenados como en duplicados
   (fecha_mensaje DESC, message_id DESC), con límite configurable (default 1000).
 - Guarda el tamaño en bytes (entero) para filtrado rápido en SQL.
 """
@@ -37,7 +37,7 @@ async def fetch_rows(db: aiosqlite.Connection, limit: int):
     sql = """
     SELECT chat_id, message_id, file_unique_id
     FROM videos_telegram
-    WHERE has_thumb = 1 AND oculto = 0 AND (thumb_bytes IS NULL OR thumb_bytes = 0)
+    WHERE has_thumb > 0 AND oculto = 0 AND (thumb_bytes IS NULL OR thumb_bytes = 0)
     ORDER BY fecha_mensaje DESC, message_id DESC
     LIMIT ?
     """
@@ -78,7 +78,7 @@ async def update_sizes(db: aiosqlite.Connection, rows) -> int:
 
 async def main():
     parser = argparse.ArgumentParser(description="Precalcular tamaño de thumbs en videos_telegram.")
-    parser.add_argument("--limit", type=int, default=50000, help="Máximo de filas a procesar (default 10000).")
+    parser.add_argument("--limit", type=int, default=100000, help="Máximo de filas a procesar (default 10000).")
     args = parser.parse_args()
 
     limit = max(1, args.limit)

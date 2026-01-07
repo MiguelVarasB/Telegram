@@ -17,27 +17,19 @@
         const { done, total, running } = state.batchScan;
         return `Escaneando (${done}/${total}, ${running} activos)`;
     }
+
     // --- Event Listeners Globales ---
     // Conecta botones, toggles y delegación de clicks a behaviors ya definidos.
+    // Nota: Los manejadores de eventos de los modales se han movido a sus respectivos archivos:
+    // - modal_video.js
+    // - modal_stats.js
+    // - modal_download.js
     function bindGlobalEvents() {
-        if (dom.modalOverlay) {
-            dom.modalOverlay.addEventListener('click', function (ev) {
-                if (ev.target === dom.modalOverlay) behaviors.closeVideoModal?.();
-            });
-        }
-        if (dom.modalClose) dom.modalClose.addEventListener('click', behaviors.closeVideoModal);
-
-        if (dom.statsButton) dom.statsButton.addEventListener('click', behaviors.openStatsModal);
-        if (dom.statsOverlay) {
-            dom.statsOverlay.addEventListener('click', function (ev) {
-                if (ev.target === dom.statsOverlay) behaviors.closeStatsModal?.();
-            });
-        }
-        if (dom.statsClose) dom.statsClose.addEventListener('click', behaviors.closeStatsModal);
 
         if (dom.hideVideoButton) {
             dom.hideVideoButton.addEventListener('click', function () {
                 if (!state.currentVideoId || !state.currentVideoElement || !state.hiddenVideos) return;
+
                 const isHidden = state.hiddenVideos.has(state.currentVideoId);
                 if (isHidden) {
                     state.hiddenVideos.delete(state.currentVideoId);
@@ -54,91 +46,7 @@
             });
         }
 
-        if (dom.videoEditSaveBtn) {
-            dom.videoEditSaveBtn.addEventListener('click', behaviors.saveVideoMetadata);
-        }
-
-        if (dom.msgToggleBtn && dom.messagesContainer && dom.msgToggleIcon) {
-            dom.msgToggleBtn.addEventListener('click', function() {
-                const isHidden = (dom.messagesContainer.style.display === 'none');
-                if (isHidden) {
-                    dom.messagesContainer.style.display = 'block';
-                    dom.msgToggleIcon.classList.remove('fa-chevron-down');
-                    dom.msgToggleIcon.classList.add('fa-chevron-up');
-                } else {
-                    dom.messagesContainer.style.display = 'none';
-                    dom.msgToggleIcon.classList.remove('fa-chevron-up');
-                    dom.msgToggleIcon.classList.add('fa-chevron-down');
-                }
-            });
-        }
-
-        if (dom.toggleDuplicates) {
-            dom.toggleDuplicates.addEventListener('change', behaviors.applyDuplicateFilter);
-        }
-
-        if (btnSyncFaltantes) {
-            btnSyncFaltantes.addEventListener('click', behaviors.triggerBatchScan);
-        }
-
-        // Delegación click para videos
-        document.addEventListener('click', function (event) {
-            const target = event.target.closest('.file-item[data-item-type="video"]');
-            if (!target) return;
-            const streamUrl = target.dataset.streamUrl || target.dataset.streamUrl;
-            if (!streamUrl) return;
-            event.preventDefault();
-            behaviors.openVideoModal?.(streamUrl, target);
-        });
-
-        // Botón "Info / Indexar" en cards de chat: abrir modal de canal
-        document.addEventListener('click', function (event) {
-            const btn = event.target.closest('.open-channel-modal');
-            if (!btn) return;
-            event.preventDefault();
-            event.stopPropagation();
-            behaviors.openChannelModal?.(btn);
-        });
-
-        // Cerrar modal de canal
-        if (dom.channelModalClose) {
-            dom.channelModalClose.addEventListener('click', behaviors.closeChannelModal);
-        }
-        if (dom.channelModalOverlay) {
-            dom.channelModalOverlay.addEventListener('click', function (ev) {
-                if (ev.target === dom.channelModalOverlay) behaviors.closeChannelModal?.();
-            });
-        }
-        // Botón abrir canal
-        if (dom.channelModalOpenBtn) {
-            dom.channelModalOpenBtn.addEventListener('click', behaviors.openChannelLink);
-        }
-        // Botón indexar faltantes
-        if (dom.channelModalScanBtn) {
-            dom.channelModalScanBtn.addEventListener('click', behaviors.triggerChannelScan);
-        }
-
-        // Delegación click para telegram
-        document.addEventListener('click', function (event) {
-            const tgBtn = event.target.closest('.btn-open-telegram');
-            if (!tgBtn) return;
-            const tgLink = tgBtn.getAttribute('data-telegram-link') || '';
-            event.preventDefault();
-            event.stopPropagation();
-            window.open(tgLink, '_blank', 'noopener,noreferrer');
-        });
-
-        // Tecla Escape
-        document.addEventListener('keydown', function (event) {
-            if (event.key !== 'Escape') return;
-            if (dom.statsOverlay && dom.statsOverlay.classList.contains('is-open')) {
-                behaviors.closeStatsModal?.();
-                return;
-            }
-            if (dom.modalOverlay && dom.modalOverlay.classList.contains('is-open')) {
-                behaviors.closeVideoModal?.();
-            }
-        });
+        // Tecla Escape - Manejo movido a los respectivos archivos de modales
     }
 
     // --- WebSocket de carpeta: recibir init/refresh y re-renderizar items ---
@@ -277,13 +185,14 @@
                     const durationText = item.duration_text || '';
                     const streamUrl = item.stream_url || (item.link || '').replace('/play/', '/video_stream/');
 
-                    html += '<a href="' + link + '" class="file-item" data-item-type="video"'
+                    html += '<div class="file-item" data-item-type="video"'
                         + ' data-stream-url="' + escapeHtml(streamUrl) + '"'
                         + (videoId ? ' data-video-id="' + escapeHtml(videoId) + '"' : '')
                         + (chatId ? ' data-chat-id="' + escapeHtml(chatId) + '"' : '')
                         + '>';
 
-                    html += '<div class="icon-box video-box">'
+                    html += '<a href="' + link + '" class="video-thumb-link" aria-label="Abrir video">'
+                        + '<div class="icon-box video-box">'
                         + '<div class="video-hidden-indicator" title="Marcado como oculto">'
                         + '<i class="fas fa-eye-slash"></i>'
                         + '</div>'
@@ -303,10 +212,10 @@
                         html += '<div class="video-duration">' + escapeHtml(durationText) + '</div>';
                     }
 
-                    html += '</div>'
+                    html += '</div></a>'
                         + '<div class="file-name" title="' + name + '">' + name + '</div>'
                         + '<div class="file-info">' + count + '</div>'
-                        + '</a>';
+                        + '</div>';
                 } else {
                     html += '<a href="' + link + '" class="file-item"'
                         + ' data-item-type="' + escapeHtml(type) + '"'

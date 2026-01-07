@@ -11,6 +11,8 @@ API_ID = int(os.getenv("API_ID", ""))
 API_HASH = os.getenv("API_HASH", "")
 # Sesión principal para scripts/CLI (usuario premium)
 SESSION_NAME = os.getenv("SESSION_NAME", "mi_sesion_premium")
+# Sesión dedicada para CLI (para evitar locks si el server usa la principal)
+SESSION_NAME_CLI = os.getenv("SESSION_NAME_CLI", f"{SESSION_NAME}_cli")
 # Sesión del servidor web (por defecto usa la misma que CLI para ecosistema único)
 SESSION_NAME_SERVER = os.getenv("SESSION_NAME_SERVER", SESSION_NAME)
 
@@ -138,7 +140,11 @@ FFPROBE_TIMEOUT = 15
 FFMPEG_THUMB_TIMEOUT = 30
 FFMPEG_SPRITE_TIMEOUT = 180
 
+RUTA_VIDEOS = r"C:\Users\TheMiguel\AppData\Local\Packages\38833FF26BA1D.UnigramPreview_g9c9v27vpyspw\LocalState\0\videos"
+
 def ensure_directories():
     # Agregamos FOLDER_SESSIONS a la lista de creación automática
     for folder in [DUMP_FOLDER, JSON_FOLDER, THUMB_FOLDER, GRUPOS_THUMB_FOLDER, CACHE_DIR, FOLDER_SESSIONS]:
         os.makedirs(folder, exist_ok=True)
+
+        

@@ -4,6 +4,26 @@
     const state = App.state || {};
     const behaviors = App.behaviors = App.behaviors || {};
 
+    // Delegación para abrir modal al hacer click en el thumbnail
+    document.addEventListener('click', function (event) {
+        const link = event.target.closest('.video-thumb-link');
+        if (!link) return;
+        const card = link.closest('.file-item[data-item-type="video"]');
+        const url = card?.dataset.streamUrl || link.getAttribute('href');
+        if (!url) return;
+        event.preventDefault();
+        event.stopPropagation();
+        behaviors.openVideoModal?.(url, card);
+    });
+
+    // Cierre al clickear el overlay
+    if (dom.modalOverlay) {
+        dom.modalOverlay.addEventListener('click', function (ev) {
+            if (ev.target === dom.modalOverlay) behaviors.closeVideoModal?.();
+        });
+    }
+    if (dom.modalClose) dom.modalClose.addEventListener('click', behaviors.closeVideoModal);
+
     // Abre modal de video y sincroniza estados/botones
     function openVideoModal(url, sourceEl) {
         if (!dom.modalOverlay || !dom.modalVideo || !url) return;

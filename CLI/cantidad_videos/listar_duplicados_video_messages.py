@@ -4,6 +4,8 @@ from pathlib import Path
 import sys
 import os
 
+"""Resumen: Lista video_id duplicados en video_messages y opcionalmente muestra sus mensajes asociados."""
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH  # noqa: E402
 

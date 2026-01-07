@@ -149,6 +149,15 @@
         loadStats();
     }
 
+    // Eventos propios del modal de estadísticas
+    if (dom.statsButton) dom.statsButton.addEventListener('click', openStatsModal);
+    if (dom.statsOverlay) {
+        dom.statsOverlay.addEventListener('click', function (ev) {
+            if (ev.target === dom.statsOverlay) closeStatsModal();
+        });
+    }
+    if (dom.statsClose) dom.statsClose.addEventListener('click', closeStatsModal);
+
     behaviors.loadStats = loadStats;
     behaviors.openStatsModal = openStatsModal;
     behaviors.closeStatsModal = closeStatsModal;

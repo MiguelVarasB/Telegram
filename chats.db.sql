@@ -21,6 +21,10 @@ CREATE TABLE IF NOT EXISTS "chats" (
 	"raw_json"	TEXT,
 	"updated_at"	TEXT,
 	"last_message_date"	TEXT,
+	"is_owner"	INTEGER DEFAULT 0,
+	"is_public"	INTEGER DEFAULT 0,
+	"has_protected_content"	INTEGER DEFAULT 0,
+	"activo"	INTEGER DEFAULT 0,
 	PRIMARY KEY("chat_id")
 );
 CREATE TABLE IF NOT EXISTS "video_file_ids" (

@@ -1,0 +1,57 @@
+<div class="tags-wrapper">
+    <div class="tags-header">
+        <div class="tags-title">
+            <h2><i class="fas fa-tags"></i> Tags</h2>
+            <p class="muted">Gestiona claves y nombres en ambos idiomas.</p>
+        </div>
+        <a class="btn ghost" href="/" title="Volver al inicio">
+            <i class="fas fa-arrow-left"></i> Volver
+        </a>
+    </div>
+
+    <div class="tags-panels">
+        <form id="tag-form" class="tag-form card" onsubmit="return false;">
+            <h3>Crear / Editar</h3>
+            <div class="field">
+                <label for="tag-key">Key</label>
+                <input id="tag-key" name="key" type="text" placeholder="Ej: nature" required>
+            </div>
+            <div class="field">
+                <label for="tag-en">Nombre en inglés</label>
+                <input id="tag-en" name="name_en" type="text" placeholder="Ej: Nature" required>
+            </div>
+            <div class="field">
+                <label for="tag-es">Nombre en español</label>
+                <input id="tag-es" name="name_es" type="text" placeholder="Ej: Naturaleza" required>
+            </div>
+            <button type="submit" class="btn primary full">
+                <i class="fas fa-save"></i> Guardar
+            </button>
+        </form>
+
+        <div class="tags-table card">
+            <div class="tags-table-head">
+                <span>Key</span>
+                <span>EN</span>
+                <span>ES</span>
+                <span class="actions-col">Acciones</span>
+            </div>
+            <div id="tags-rows" class="tags-table-body">
+                {% for tag in items %}
+                <div class="tags-row" data-key="{{ tag.key }}">
+                    <span class="tag-key">{{ tag.key }}</span>
+                    <span class="tag-en">{{ tag.name_en }}</span>
+                    <span class="tag-es">{{ tag.name_es }}</span>
+                    <div class="row-actions">
+                        <button class="btn small ghost edit-tag" type="button" data-key="{{ tag.key }}">
+                            <i class="fas fa-pen"></i> Editar
+                        </button>
+                    </div>
+                </div>
+                {% else %}
+                <div class="empty">No hay tags aún. Crea el primero.</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>

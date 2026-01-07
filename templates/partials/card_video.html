@@ -1,7 +1,7 @@
 
 
-<a href="{{ item.link }}" class="file-item" data-item-type="video"
-   data-stream-url="{{ item.stream_url or item.link|replace('/play/', '/video_stream/', 1) }}"
+<div class="file-item" data-item-type="video"
+   data-stream-url="{% set base_stream = item.stream_url or item.link|replace('/play/', '/video_stream/', 1) %}{{ base_stream }}{% if item.file_unique_id is defined and item.file_unique_id %}?file_unique_id={{ item.file_unique_id }}{% endif %}"
    data-video-id="{{ item.video_id }}"
    data-name="{{ item.name|replace('"', '&quot;') }}"
    data-size="{{ item.count }}"
@@ -15,50 +15,98 @@
    {% if item.file_unique_id is defined %}data-file-unique-id="{{ item.file_unique_id }}"{% endif %}
    {% if item.messages_count is defined %}data-messages-count="{{ item.messages_count }}"{% endif %}
    data-watch-later="{% if item.watch_later %}1{% else %}0{% endif %}"
+   {% if item.chat_name is defined and item.chat_name %}data-chat-name="{{ item.chat_name|replace('"', '&quot;') }}"{% endif %}
+   {% if item.chat_username is defined and item.chat_username %}data-chat-username="{{ item.chat_username }}"{% endif %}
    {% if item.chat_id is defined %}data-chat-id="{{ item.chat_id }}"{% endif %}
    {% if item.message_id is defined %}data-message-id="{{ item.message_id }}"{% endif %}>
-<button type="button"
- class="btn-card-watch-later btn-watchlater-overlay" 
- onclick="toggleWatchLater(event, '{{ item.video_id }}')"
-  title="Ver más tarde">
-           <i class="fa-regular fa-clock"></i>
+    <button type="button"
+     class="btn-card-watch-later btn-watchlater-overlay" 
+     onclick="toggleWatchLater(event, '{{ item.video_id }}')"
+      title="Ver más tarde">
+               <i class="fa-regular fa-clock"></i>
+                
+            </button>
+     {% if item.has_thumb==1 %}
+     <span style="color: rgb(255, 149, 0); z-index: 1; position: absolute; top: 0; right: 0;">
+     <i class="fa-solid fa-exclamation"></i>
+     </span>
+     {% endif %}
+     
+    <a href="{{ item.link }}{% if item.file_unique_id is defined and item.file_unique_id %}?file_unique_id={{ item.file_unique_id }}{% endif %}" class="video-thumb-link" aria-label="Abrir video">
+        <div class="icon-box video-box">
+                <div class="video-hidden-indicator" title="Marcado como oculto" style="color: white">
+                    <i class="fas fa-eye-slash"></i>
+        </div>
             
-        </button>
-<div class="icon-box video-box">
-        <div class="video-hidden-indicator" title="Marcado como oculto">
-            <i class="fas fa-eye-slash"></i>
+
+            <div class="video-loading-spinner" aria-hidden="true">
+                <i class="fas fa-circle-notch fa-spin"></i>
+            </div>
+
+            {% if item.photo_id %}
+                <img src="/api/photo/{{ item.photo_id }}?chat_id={{ item.chat_id }}&video_id={{ item.video_id }}&has_thumb={{ item.has_thumb }}&dump_message_id={{ item.dump_message_id }}" class="video-thumb" loading="lazy">
+            {% else %}
+                <i class="fas fa-file-video file-video"></i>
+            {% endif %}
+
+            {% if item.duration_text %}
+                <div class="video-duration">{{ item.duration_text }}</div>
+            {% endif %}
+        </div>
+    </a>
+        <div class="file-name" title="{{ item.name|replace('"', '&quot;') }}">{{ item.name }}</div>
+        <div class="file-info file-meta">
+            <span>{{ item.count }}</span>
+            <span class="file-actions-right">
+                {% if item.downloaded %}
+                    <a class="btn-play"
+                       href="/playwindows/{{ item.chat_id }}/{{ item.message_id }}{% if item.file_unique_id is defined and item.file_unique_id %}?file_unique_id={{ item.file_unique_id }}{% endif %}"
+                       title="Reproducir"
+                       aria-label="Reproducir video descargado"
+                       style="background:#0fb37f;color:#fff;border-radius:6px;padding:8px 10px;display:inline-flex;align-items:center;gap:6px;">
+                        <i class="fa-solid fa-play" style="color:#fff;"></i>
+                        <span style="font-size:12px;font-weight:600;">Play</span>
+                    </a>
+                {% else %}
+                    <button type="button"
+                            class="btn-download"
+                            data-action="download"
+                            title="Descargar"
+                            aria-label="Descargar video">
+                        <i class="fa-solid fa-download"></i>
+                    </button>
+                {% endif %}
+            </span>
+        </div>
+        <div class="file-info download-status-row" data-download-status style="display:none;align-items:center;gap:6px;color:#0fb37f;font-weight:600;">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+            <span>Descargando...</span>
+            <button type="button"
+                    class="btn-cancel-download"
+                    title="Cancelar descarga"
+                    aria-label="Cancelar descarga"
+                    style="margin-left:auto;background:transparent;border:none;color:#fff;cursor:pointer;padding:4px 8px;border-radius:4px;">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        {% if item.messages_count is defined %}
+            <div class="file-info">Mensajes asociados: {{ item.messages_count }}</div>
+        {% endif %}
+
+       
+
+        {% if item.chat_id is defined or item.message_id is defined or item.file_unique_id is defined %}
+            <div class="file-info">
+                {% if item.chat_id is defined %}
+                    {% set chat_label = item.chat_name or (item.chat_username and ('@' ~ item.chat_username)) or ('Canal ' ~ item.chat_id) %}
+                    {% set chat_link = item.chat_username and ('https://t.me/' ~ item.chat_username) or ('/channel/' ~ item.chat_id) %}
+                    Canal: <a href="{{ chat_link }}" target="_blank" rel="noopener noreferrer">{{ chat_label }}</a>
+                {% endif %}
+                {% if item.chat_id is defined and (item.message_id is defined or item.file_unique_id is defined) %} · {% endif %}
+                {% if item.message_id is defined %}Mensaje ID: {{ item.message_id }}{% endif %}
+                {% if item.message_id is defined and item.file_unique_id is defined %} · {% endif %}
+                {% if item.file_unique_id is defined %}File Unique ID: {{ item.file_unique_id }}{% endif %}
+            </div>
+        {% endif %}
 </div>
-        
-
-        <div class="video-loading-spinner" aria-hidden="true">
-            <i class="fas fa-circle-notch fa-spin"></i>
-        </div>
-
-        {% if item.photo_id %}
-            <img src="/api/photo/{{ item.photo_id }}?chat_id={{ item.chat_id }}&video_id={{ item.video_id }}&has_thumb={{ item.has_thumb }}&dump_message_id={{ item.dump_message_id }}" class="video-thumb" loading="lazy">
-        {% else %}
-            <i class="fas fa-file-video file-video"></i>
-        {% endif %}
-
-        {% if item.duration_text %}
-            <div class="video-duration">{{ item.duration_text }}</div>
-        {% endif %}
-    </div>
-    
-    <div class="file-name" title="{{ item.name|replace('"', '&quot;') }}">{{ item.name }}</div>
-    <div class="file-info">{{ item.count }}</div>
-    {% if item.messages_count is defined %}
-        <div class="file-info">Mensajes asociados: {{ item.messages_count }}</div>
-    {% endif %}
-
-    {% if item.chat_id is defined or item.message_id is defined or item.file_unique_id is defined %}
-        <div class="file-info">
-            {% if item.chat_id is defined %}Chat ID: {{ item.chat_id }}{% endif %}
-            {% if item.chat_id is defined and (item.message_id is defined or item.file_unique_id is defined) %} · {% endif %}
-            {% if item.message_id is defined %}Mensaje ID: {{ item.message_id }}{% endif %}
-            {% if item.message_id is defined and item.file_unique_id is defined %} · {% endif %}
-            {% if item.file_unique_id is defined %}File Unique ID: {{ item.file_unique_id }}{% endif %}
-        </div>
-    {% endif %}
-</a>
 

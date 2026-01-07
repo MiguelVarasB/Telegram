@@ -26,6 +26,11 @@ from .videos import (
     db_count_videos_by_chat
 )
 from .folders import get_folder_items_from_db
+from .tags import (
+    db_upsert_tag,
+    db_list_tags,
+    db_ensure_tags_table,
+)
 
 __all__ = [
     # Conexión
@@ -49,4 +54,9 @@ __all__ = [
     "db_get_video_messages",
     "db_count_videos_by_chat",
     "get_folder_items_from_db",
+    
+    # Tags
+    "db_upsert_tag",
+    "db_list_tags",
+    "db_ensure_tags_table",
 ]

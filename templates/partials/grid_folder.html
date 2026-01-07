@@ -1,0 +1,96 @@
+{# Vista para carpetas / contenido distinto a 'files' siempre el 100% #}
+<div class="container px-3 px-md-4 mx-auto container-fluid">
+    <div class="section-title results-title-bar d-flex flex-wrap align-items-center gap-2 justify-content-between w-100">
+        <span id="results-title" class="flex-grow-1 text-start">Contenido</span>
+        <div class="d-flex flex-wrap align-items-center gap-2 justify-content-end ms-auto">
+            {% if current_folder_id is defined %}
+            <div class="sort-controls d-flex align-items-center flex-wrap gap-2">
+                <form method="get" action="{{ current_folder_url or '' }}" class="d-flex align-items-center gap-2 flex-wrap flex-md-nowrap justify-content-end">
+                    <label for="sort-folder" class="form-label m-0">Ordenar por:</label>
+                    <select name="sort" id="sort-folder" class="form-select form-select-sm bg-dark text-light border-secondary w-auto" style="min-width: 160px;" onchange="this.form.submit()">
+                        <option value="faltantes" {% if current_sort == 'faltantes' %}selected{% endif %}>Faltantes</option>
+                        <option value="indexados" {% if current_sort == 'indexados' %}selected{% endif %}>Indexados</option>
+                        <option value="totales" {% if current_sort == 'totales' %}selected{% endif %}>Totales</option>
+                        <option value="nombre" {% if current_sort == 'nombre' %}selected{% endif %}>Nombre</option>
+                        <option value="fecha_scan" {% if current_sort == 'fecha_scan' %}selected{% endif %}>Fecha scan</option>
+                        <option value="ultimo_msg" {% if current_sort == 'ultimo_msg' %}selected{% endif %}>Último mensaje</option>
+                        <option value="completos" {% if current_sort == 'completos' %}selected{% endif %}>Completos primero</option>
+                    </select>
+                    <select name="direction" class="form-select form-select-sm bg-dark text-light border-secondary w-auto" style="min-width: 110px;" onchange="this.form.submit()">
+                        <option value="desc" {% if current_direction == 'desc' %}selected{% endif %}>Desc</option>
+                        <option value="asc" {% if current_direction == 'asc' %}selected{% endif %}>Asc</option>
+                    </select>
+                </form>
+            </div>
+            {% endif %}
+            {% if current_folder_id == -1 %}
+            <button type="button" id="btn-sync-faltantes" class="btn-sync ">
+                Sincronizar faltantes
+            </button>
+            {% else %}
+            <div class="results-limit-control align-items-center gap-2 d-none d-md-flex" id="limites">
+                <label for="search-limit" class="m-0">Límite</label>
+                <input
+                    type="number"
+                    id="search-limit"
+                    name="limit"
+                    min="1"
+                    max="10000"
+                    value="20"
+                    step="100"
+                    inputmode="numeric"
+                    class="form-control form-control-sm bg-dark text-light border-secondary"
+                >
+            </div>
+            {% endif %}
+            
+            
+        </div>
+    </div>
+
+    {% if pagination is defined and pagination %}
+        <div class="pagination-bar">
+            <div class="pagination-info">
+                Página {% if pagination.page_fmt is defined %}{{ pagination.page_fmt }}{% else %}{{ pagination.page }}{% endif %}
+                de {% if pagination.total_pages_fmt is defined %}{{ pagination.total_pages_fmt }}{% else %}{{ pagination.total_pages }}{% endif %}
+
+                {% if pagination.total_items_fmt is defined %}
+                    <span class="pagination-muted">(Total: {{ pagination.total_items_fmt }})</span>
+                {% elif pagination.total_items is defined %}
+                    <span class="pagination-muted">(Total: {{ pagination.total_items }})</span>
+                {% endif %}
+            </div>
+            <div class="pagination-actions">
+                {% if pagination.has_prev %}
+                    <a class="pagination-btn" href="{{ pagination.base_path }}?page={{ pagination.prev_page }}&per_page={{ pagination.per_page }}{{ pagination.query_suffix }}">Anterior</a>
+                {% else %}
+                    <span class="pagination-btn is-disabled">Anterior</span>
+                {% endif %}
+
+                <div class="pagination-pages">
+                    {% for p in pagination.pages %}
+                        {% if p is none %}
+                            <span class="pagination-ellipsis">…</span>
+                        {% elif p == pagination.page %}
+                            <span class="pagination-btn is-current">{{ p }}</span>
+                        {% else %}
+                            <a class="pagination-btn" href="{{ pagination.base_path }}?page={{ p }}&per_page={{ pagination.per_page }}{{ pagination.query_suffix }}">{{ p }}</a>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+
+                {% if pagination.has_next %}
+                    <a class="pagination-btn" href="{{ pagination.base_path }}?page={{ pagination.next_page }}&per_page={{ pagination.per_page }}{{ pagination.query_suffix }}">Siguiente</a>
+                {% else %}
+                    <span class="pagination-btn is-disabled">Siguiente</span>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="grid-view mt-3">
+        {% for item in items %}
+            {% include 'partials/card_folder.html' %}
+        {% endfor %}
+    </div>
+</div>

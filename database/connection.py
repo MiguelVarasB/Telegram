@@ -116,6 +116,17 @@ async def init_db():
     Inicializa la base de datos y crea las tablas necesarias si no existen.
     """
     async with get_db() as db:
+        # Tabla de tags (traducciones básicas)
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tags (
+                key TEXT PRIMARY KEY,
+                name_en TEXT NOT NULL,
+                name_es TEXT NOT NULL
+            )
+            """
+        )
+
         # Crear tabla de chats
         await db.execute("""
             CREATE TABLE IF NOT EXISTS chats (
@@ -188,6 +199,17 @@ async def init_db():
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_videos_watch_later 
             ON videos_telegram(watch_later)
+        """)
+        
+        # Índices para consultas por chat y sin thumb (usados en /api/stats)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_videos_chat_id 
+            ON videos_telegram(chat_id)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_videos_chat_thumb 
+            ON videos_telegram(chat_id, has_thumb)
         """)
         
         # Aplicar migraciones

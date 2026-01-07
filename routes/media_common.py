@@ -26,12 +26,12 @@ thumb_db_cache: dict[str, tuple | None] = {}
 
 
 # --- UTILS DB ASYNC ---
-async def get_video_info_from_db(chat_id: int, message_id: int):
+async def get_video_info_from_db(chat_id: int, message_id: int, file_unique_id: str | None = None):
     """
     Busca de forma ASÍNCRONA si el video ya está descargado por completo en disco.
     Usa caché en memoria para evitar consultas repetidas.
     """
-    cache_key = f"{chat_id}:{message_id}"
+    cache_key = f"{chat_id}:{message_id}:{file_unique_id or ''}"
 
     # 1. Intentar obtener de la caché
     if cache_key in video_info_cache:
@@ -40,10 +40,14 @@ async def get_video_info_from_db(chat_id: int, message_id: int):
     # 2. Si no está en caché, consultar BD
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(
-                "SELECT id, ruta_local FROM videos_telegram WHERE chat_id = ? AND message_id = ?",
-                (chat_id, message_id),
-            ) as cursor:
+            if file_unique_id:
+                query = "SELECT id, ruta_local FROM videos_telegram WHERE chat_id = ? AND message_id = ? AND file_unique_id = ?"
+                params = (chat_id, message_id, file_unique_id)
+            else:
+                query = "SELECT id, ruta_local FROM videos_telegram WHERE chat_id = ? AND message_id = ?"
+                params = (chat_id, message_id)
+
+            async with db.execute(query, params) as cursor:
                 row = await cursor.fetchone()
                 if row:
                     # Guardar en caché

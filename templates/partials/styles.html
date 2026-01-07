@@ -18,8 +18,13 @@
         padding: 20px;
         overflow-y: scroll;
     }
+    .container {
+    /* padding: 25px; */
+    flex: 1;
+    max-width: 100%;
+}
     .browser-container {
-        max-width: 1600px;
+       
         margin: 0 auto;
         background: #181818;
         border-radius: 6px;
@@ -30,10 +35,11 @@
     }
     .top-bar {
         background-color: var(--header-bg);
-        padding: 15px 20px;
-        display: flex;
+        padding: 10px 14px;
+        display: grid;
+        grid-template-columns: minmax(220px, auto) 1fr;
+        gap: 10px 12px;
         align-items: center;
-        justify-content: space-between;
         border-bottom: 1px solid #333;
         position: sticky;
         top: 0;
@@ -43,8 +49,8 @@
         display: flex;
         align-items: center;
         gap: 12px;
-        flex: 1;
         min-width: 0;
+        flex-wrap: wrap;
     }
     .logo {
         font-size: 18px;
@@ -82,9 +88,13 @@
     .header-actions {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         font-size: 0.85rem;
         color: var(--text-muted);
+        flex-wrap: wrap;
+        row-gap: 8px;
+        justify-content: flex-end;
+        width: 100%;
     }
     .search-bar {
         display: inline-flex;
@@ -94,13 +104,17 @@
         border: 1px solid #333;
         border-radius: 10px;
         padding: 6px 8px;
+        flex: 1 1 320px;
+        min-width: 220px;
+        max-width: 620px;
     }
     .search-bar input[type="text"] {
         background: transparent;
         border: none;
         color: var(--text-main);
-        padding: 6px 8px;
-        min-width: 180px;
+        padding: 6px 6px;
+        min-width: 140px;
+        width: 100%;
         outline: none;
         font-size: 0.9rem;
     }
@@ -109,8 +123,9 @@
         border: 1px solid #333;
         color: var(--text-main);
         border-radius: 6px;
-        padding: 6px 8px;
-        font-size: 0.85rem;
+        padding: 4px 6px;
+        font-size: 0.8rem;
+        white-space: nowrap;
     }
     .btn-search {
         background: var(--file-blue);
@@ -153,10 +168,9 @@
         margin-bottom: 15px;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 20px;
     }
     .sort-controls form {
         display: inline-flex;
@@ -166,6 +180,7 @@
         border: 1px solid #2f2f2f;
         border-radius: 8px;
         padding: 6px 8px;
+        flex-wrap: wrap;
     }
     .grid-view {
         display: grid;
@@ -394,33 +409,35 @@
     .folder-chat { color: var(--folder-gray); }
     .file-video  { color: var(--file-blue); }
     .file-name {
-        font-size: 0.9rem;
-        font-weight: 500;
+        display: block;
+        font-size: 0.86rem;
+        font-weight: 600;
+        color: var(--text-main);
+        line-height: 1.25;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        height: auto;
+        padding: 0;
+        margin: 0;
     }
-    .file-info {
-        font-size: 0.75rem;
-        color: var(--text-muted);
-    }
-    .btn-open-telegram {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        width: 37px;
-        height: 37px;
-        border-radius: 50%;
+    .file-meta {
         display: flex;
         align-items: center;
-        justify-content: center;
-        background: rgba(0, 0, 0, 0.65);
-        color: #2AABEE;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        z-index: 20;
-        cursor: pointer;
-        user-select: none;
-        pointer-events: auto;
+        justify-content: space-between;
+        gap: 8px;
+        line-height: 1.2;
+        font-size: 0.75rem;
+        font-weight: 400;
+        color: var(--text-muted);
+    }
+    .file-meta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
     }
 
     .btn-open-telegram:hover {
@@ -428,7 +445,6 @@
         border-color: rgba(255, 255, 255, 0.22);
         color: #5bc0ff;
     }
-
     .btn-back {
         background: #333;
         border: none;
@@ -444,47 +460,112 @@
         font-size: 14px;
     }
     .btn-back:hover {
-        background: #444;
+        background: #555;
     }
-    
-    /* --- Modal de video CON SCROLL --- */
+
+    /* --- Modales (video / stats / downloads) --- */
+    .stats-modal-overlay,
+    .downloads-modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.85);
+        display: none;
+        overflow-y: auto;
+        padding: 20px;
+        z-index: 2050;
+        align-items: center;
+        justify-content: center;
+    }
+    .stats-modal-overlay.is-open,
+    .downloads-modal-overlay.is-open {
+        display: flex;
+    }
+
+    .stats-modal,
+    .downloads-modal {
+        width: 100%;
+        background: #181818;
+        border: 1px solid #333;
+        border-radius: 10px;
+        box-shadow: 0 20px 70px rgba(0,0,0,0.7);
+        padding: 18px;
+        position: relative;
+        color: var(--text-main);
+    }
+    .stats-modal { max-width: 960px; }
+    .downloads-modal { max-width: 520px; }
+
+    .stats-modal-header,
+    .downloads-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+    .stats-modal-title,
+    .downloads-title {
+        font-size: 1.1rem;
+        font-weight: 800;
+    }
+
+    .stats-modal-body,
+    .downloads-body {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-height: 72vh;
+        overflow-y: auto;
+        background: #202020;
+        border: 1px solid #2b2b2b;
+        border-radius: 10px;
+        padding: 12px;
+    }
+
+    .modal-close {
+        position: absolute;
+        top: 12px;
+        right: 16px;
+        color: #fff;
+        background: transparent;
+        border: none;
+        font-size: 32px;
+        cursor: pointer;
+    }
+    .modal-close:hover {
+        color: #ff5555;
+        background: transparent;
+    }
+
     .video-modal-overlay {
         position: fixed;
         inset: 0;
         background: rgba(0,0,0,0.95);
         display: none;
-        /* Scroll habilitado en el overlay */
         overflow-y: auto; 
         padding: 0;
         z-index: 2000;
+        align-items: flex-start;
+        justify-content: center;
     }
     .video-modal-overlay.is-open {
-        /* Usamos flex para poder usar margin:auto en el hijo y centrar */
         display: flex; 
     }
+
     .video-modal {
         position: relative;
         width: 100%;
-        /* Quitamos height:100% fijo para permitir que crezca */
         min-height: 100%; 
-        
-        /* margin: auto en un contenedor flex centra vertical y horizontalmente, 
-           pero permite scroll seguro si el contenido desborda */
         margin: auto; 
-        
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center; /* Centra el contenido si sobra espacio */
-        
+        justify-content: center;
         background: transparent;
         box-shadow: none;
-        /* Padding vertical para que el video no pegue con los bordes al scrollear */
         padding: 40px 0; 
     }
     .video-modal video {
         max-width: 90%;
-        /* Altura máxima un poco menor para dar espacio a info */
         max-height: 80vh; 
         background: #000;
         outline: none;
@@ -492,7 +573,7 @@
     }
     .modal-close {
         position: absolute;
-        top: 20px;
+        top: 0px;
         right: 30px;
         width: auto;
         height: auto;
@@ -502,8 +583,6 @@
         color: #fff;
         font-size: 40px;
         cursor: pointer;
-        /* Aseguramos que el botón de cerrar esté siempre visible o fijo si se prefiere,
-           pero con position absolute dentro del modal se mueve con él. */
     }
     .modal-close:hover {
         color: #ff5555;
@@ -539,84 +618,51 @@
     }
 
     .btn-stats {
-        padding: 8px 12px;
+        padding: 6px 10px;
         border-radius: 6px;
         border: 1px solid #444;
-        background: #202020;
+        background: #1f1f1f;
         color: var(--text-main);
         font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         cursor: pointer;
         transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        white-space: nowrap;
     }
     .btn-stats:hover {
         transform: translateY(-1px);
         box-shadow: 0 8px 24px rgba(0,0,0,0.4);
         background: #2a2a2a;
     }
-
-    /* --- Modal de estadísticas --- */
-    .stats-modal-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.85);
-        display: none;
-        overflow-y: auto;
-        padding: 20px;
-        z-index: 2100;
-    }
-    .stats-modal-overlay.is-open {
-        display: flex;
-    }
-    .stats-modal {
-        position: relative;
-        width: 100%;
-        max-width: 920px;
-        margin: auto;
-        background: #181818;
-        border: 1px solid #333;
-        border-radius: 10px;
-        box-shadow: 0 20px 70px rgba(0,0,0,0.7);
-        padding: 18px 18px 20px 18px;
-    }
-    .stats-modal-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 12px;
-        padding-right: 40px;
-    }
-    .stats-modal-title {
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: var(--text-main);
-    }
-    .stats-modal-body {
-        color: var(--text-main);
+    .stats-section {
+        margin-top: 14px;
     }
     .stats-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-        gap: 12px;
-        margin-bottom: 14px;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 10px;
     }
     .stats-card {
         background: #202020;
         border: 1px solid #2f2f2f;
         border-radius: 10px;
         padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.25);
     }
     .stats-label {
-        font-size: 0.8rem;
         color: var(--text-muted);
-        margin-bottom: 6px;
+        font-size: 0.85rem;
+        letter-spacing: 0.01em;
     }
     .stats-value {
-        font-size: 1.4rem;
-        font-weight: 700;
+        font-weight: 800;
+        font-size: 1.25rem;
         color: var(--text-main);
-    }
-    .stats-section {
-        margin-top: 14px;
     }
     .stats-section-title {
         font-size: 0.9rem;
@@ -715,7 +761,7 @@
         align-items: center;
         gap: 6px;
         color: var(--text-muted);
-        font-size: 0.85rem;
+        font-size: 0.8rem;
     }
     .dupes-field input,
     .dupes-field select {
@@ -910,5 +956,139 @@ button.btn-card-watch-later.btn-watchlater-overlay {
         margin-top: 14px;
     }
 
+    /* ---------- Tags UI ---------- */
+    .tags-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+    .tags-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        background: #1d1d1d;
+        padding: 14px 16px;
+        border: 1px solid #2b2b2b;
+        border-radius: 10px;
+    }
+    .tags-title h2 {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 1.3rem;
+    }
+    .tags-title .muted {
+        margin: 4px 0 0 0;
+        color: var(--text-muted);
+    }
+    .tags-panels {
+        display: grid;
+        grid-template-columns: minmax(320px, 420px) 1fr;
+        gap: 16px;
+    }
+    .card {
+        background: #1a1a1a;
+        border: 1px solid #2b2b2b;
+        border-radius: 12px;
+        padding: 14px;
+        box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+    }
+    .tag-form h3 {
+        margin-top: 0;
+        margin-bottom: 10px;
+        font-size: 1rem;
+        letter-spacing: 0.01em;
+    }
+    .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 12px;
+    }
+    .field label {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+    }
+    .field input {
+        background: #0f0f0f;
+        border: 1px solid #2e2e2e;
+        border-radius: 8px;
+        color: var(--text-main);
+        padding: 10px;
+        font-size: 0.95rem;
+    }
+    .btn.full {
+        width: 100%;
+        justify-content: center;
+    }
+    .btn.ghost {
+        background: transparent;
+        border: 1px solid #3a3a3a;
+        color: var(--text-main);
+    }
+    .btn.ghost:hover {
+        background: #242424;
+    }
 
+    .tags-table {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        overflow: hidden;
+    }
+    .tags-table-head,
+    .tags-row {
+        display: grid;
+        grid-template-columns: 1.2fr 1fr 1fr 0.9fr;
+        align-items: center;
+        gap: 8px;
+    }
+    .tags-table-head {
+        padding: 10px 12px;
+        background: #202020;
+        border-bottom: 1px solid #2c2c2c;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        font-size: 0.8rem;
+    }
+    .tags-table-body {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+    .tags-row {
+        padding: 10px 12px;
+        border-bottom: 1px solid #262626;
+        background: #161616;
+    }
+    .tags-row:hover {
+        background: #1f1f1f;
+    }
+    .tags-row span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .row-actions {
+        display: flex;
+        justify-content: flex-end;
+    }
+    .tags-row .btn.small {
+        padding: 6px 10px;
+        font-size: 0.85rem;
+        border-radius: 8px;
+    }
+    .actions-col {
+        text-align: right;
+    }
+    .empty {
+        padding: 14px;
+        color: var(--text-muted);
+    }
+    .file-info {
+    font-size: 13px;
+}
 </style>

@@ -3,6 +3,8 @@
          {% include 'partials/player.html' %}
      {% elif view_type == 'duplicates' %}
          {% include 'partials/duplicates.html' %}
+     {% elif view_type == 'tags' %}
+         {% include 'partials/tags.html' %}
      {% else %}
          {% include 'partials/grid.html' %}
      {% endif %}

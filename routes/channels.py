@@ -211,12 +211,16 @@ async def _thumb_poller(stop_event: asyncio.Event):
     while not stop_event.is_set():
         try:
             await background_thumb_downloader()
+        except asyncio.CancelledError:
+            break
         except Exception:
             pass
         await asyncio.sleep(5)
     # Última pasada al terminar el escaneo
     try:
         await background_thumb_downloader()
+    except asyncio.CancelledError:
+        pass
     except Exception:
         pass
 
@@ -230,7 +234,7 @@ async def get_local_videos(chat_id: int):
             cursor = await db.execute("""
                 SELECT message_id, nombre, tamano_bytes, file_unique_id, 
                        file_id, caption, duracion, ancho, alto, mime_type, 
-                       views, outgoing, fecha_mensaje,
+                       views, outgoing, fecha_mensaje, has_thumb,
                        (
                            SELECT COUNT(*) FROM video_messages vm
                            WHERE vm.video_id = videos_telegram.file_unique_id
@@ -259,6 +263,7 @@ async def get_local_videos(chat_id: int):
                     "views": r["views"],
                     "date": r["fecha_mensaje"],
                     "messages_count": r["messages_count"],
+                    "has_thumb": r["has_thumb"]
                 })
     except Exception as e:
         print(f"⚠️ Error leyendo cache local: {e}")
@@ -382,7 +387,10 @@ async def scan_channel_background(chat_id: int, run_thumb_worker: bool = True):
     finally:
         stop_event.set()
         if thumb_task:
-            await thumb_task
+            try:
+                await thumb_task
+            except asyncio.CancelledError:
+                pass
 
 @router.get("/channel/{chat_id}")
 async def ver_canal(

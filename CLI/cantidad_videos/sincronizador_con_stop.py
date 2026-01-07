@@ -8,6 +8,9 @@ import uuid
 import aiosqlite
 from pyrogram import enums
 
+"""Resumen: Sincroniza videos recientes por chat buscando coincidencia con los últimos 5 IDs conocidos y detiene al encontrarlos."""
+
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import DB_PATH  # noqa: E402

@@ -4,6 +4,9 @@ import os
 import sys
 import time
 
+"""Resumen: Escanea últimos 24h de chats (inbox y archivados) y actualiza metadatos básicos en BD."""
+
+
 from pyrogram.raw.functions.messages import GetDialogs
 from pyrogram.raw.types import (
     InputPeerChannel,

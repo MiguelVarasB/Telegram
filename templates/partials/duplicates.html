@@ -6,6 +6,7 @@
         <label class="dupes-check"><input type="checkbox" id="dupe-by-duration" checked> Misma duración</label>
         <label class="dupes-check"><input type="checkbox" id="dupe-by-video-size" checked> Mismo peso</label>
         <label class="dupes-check"><input type="checkbox" id="dupe-by-thumb" checked> Misma thumb</label>
+        <label class="dupes-check"><input type="checkbox" id="dupe-by-channel" checked> Mismo canal</label>
 
         <label class="dupes-field">Tolerancia duración (s)
             <input type="number" id="dupe-duration-tol" value="0" min="0" max="60">
@@ -16,7 +17,8 @@
         <label class="dupes-field">Thumb por
             <select id="dupe-thumb-mode">
                 <option value="wh">ancho/alto</option>
-                <option value="bytes" selected>peso archivo</option>
+                <option value="bytes">peso archivo</option>
+                <option value="phash" selected>phash</option>
                 <option value="sim">semejanza (GPU)</option>
             </select>
         </label>
@@ -72,6 +74,7 @@
         var byDuration = document.getElementById('dupe-by-duration')?.checked;
         var byVideoSize = document.getElementById('dupe-by-video-size')?.checked;
         var byThumb = document.getElementById('dupe-by-thumb')?.checked;
+        var byChannel = document.getElementById('dupe-by-channel')?.checked;
         var durationTol = Number(document.getElementById('dupe-duration-tol')?.value || 0);
         var sizeTol = Number(document.getElementById('dupe-size-tol')?.value || 0);
         var thumbMode = document.getElementById('dupe-thumb-mode')?.value || 'wh';
@@ -80,14 +83,17 @@
         var minGroupSize = Number(document.getElementById('dupe-min-group')?.value || 2);
 
         var bySimilarity = byThumb && thumbMode === 'sim';
-        var byThumbSize = byThumb && thumbMode !== 'sim';
+        var byThumbPhash = byThumb && thumbMode === 'phash';
+        var byThumbSize = byThumb && thumbMode !== 'sim' && thumbMode !== 'phash';
 
         return {
             by_name: byName ? 'true' : 'false',
             by_duration: byDuration ? 'true' : 'false',
             by_video_size: byVideoSize ? 'true' : 'false',
             by_thumb_size: byThumbSize ? 'true' : 'false',
+            by_thumb_phash: byThumbPhash ? 'true' : 'false',
             by_similarity: bySimilarity ? 'true' : 'false',
+            by_channel: byChannel ? 'true' : 'false',
             duration_tol: String(Math.max(0, Math.min(60, Math.trunc(durationTol || 0)))),
             size_tol_bytes: String(Math.max(0, Math.min(50000000, Math.trunc(sizeTol || 0)))),
             thumb_mode: thumbMode,
@@ -168,7 +174,7 @@
                    +   '</div>';
 
             html +=   '<div class="dupe-items">';
-
+           var v=Date.now();
             items.forEach(function (it, idx) {
                 console.log(it)
                 var name = escapeHtml(it.nombre || 'Video');
@@ -179,7 +185,7 @@
                 var play = it.play_link;
                 var sizeTxt = escapeHtml(it.tamano_text || '');
                 var durTxt = formatSeconds(it.duracion || 0);
-                var thumbUrl = it.thumb_url;
+                var thumbUrl = it.thumb_url+"&V="+v;
                 var shouldCheck = idx !== keepIndex;
 
                 html += '<div class="dupe-item">';
@@ -187,7 +193,7 @@
                        +     '<input class="dupe-item-check" type="checkbox" aria-label="Seleccionar" data-chat-id="' + escapeHtml(chatId) + '" data-message-id="' + escapeHtml(msgId) + '"' + (shouldCheck ? ' checked' : '') + '>'
                        +   '</label>';
 
-                html +=   '<a href="' + escapeHtml(play) + '" class="file-item dupe-item-card" data-item-type="video"'
+                html +=   '<a href="' + escapeHtml(play) + '" class="file-item dupe-item-card video-thumb-link" data-item-type="video"'
                        +   ' data-stream-url="' + escapeHtml(String(play).replace('/play/', '/video_stream/')) + '"'
                        +   ' data-video-id="' + escapeHtml(it.video_id || '') + '"'
                        +   ' data-name="' + name.replace(/"/g, '&quot;') + '"'

@@ -1,6 +1,8 @@
 import os
+import platform
+import subprocess
 import aiosqlite
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Request, Query, HTTPException
 from fastapi.templating import Jinja2Templates
 
 from config import TEMPLATES_DIR, THUMB_FOLDER, MAIN_TEMPLATE, DB_PATH,LIMIT_PER_PAGE
@@ -11,11 +13,12 @@ router = APIRouter()
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 @router.get("/play/{chat_id}/{message_id}")
-async def player_page(request: Request, chat_id: int, message_id: int):
-    stream_url = f"/video_stream/{chat_id}/{message_id}"
+async def player_page(request: Request, chat_id: int, message_id: int, file_unique_id: str | None = Query(None)):
+    base_stream = f"/video_stream/{chat_id}/{message_id}"
+    stream_url = f"{base_stream}?file_unique_id={file_unique_id}" if file_unique_id else base_stream
 
     # DB call async
-    video_id, local_path = await get_video_info_from_db(chat_id, message_id)
+    video_id, local_path = await get_video_info_from_db(chat_id, message_id, file_unique_id)
     is_downloaded = local_path and os.path.exists(local_path)
 
     return templates.TemplateResponse(
@@ -30,6 +33,29 @@ async def player_page(request: Request, chat_id: int, message_id: int):
             "is_downloaded": is_downloaded,
         },
     )
+
+
+@router.get("/playwindows/{chat_id}/{message_id}")
+async def player_windows(chat_id: int, message_id: int, file_unique_id: str | None = Query(None)):
+    """
+    Abre el video descargado con el reproductor predeterminado de Windows.
+    """
+    if platform.system() != "Windows":
+        raise HTTPException(status_code=400, detail="Reproducción local solo disponible en Windows.")
+
+    _, local_path = await get_video_info_from_db(chat_id, message_id, file_unique_id)
+    if not local_path or not os.path.exists(local_path):
+        raise HTTPException(status_code=404, detail="El video no está descargado en el servidor.")
+
+    try:
+        os.startfile(local_path)  # type: ignore[attr-defined]
+    except Exception:
+        try:
+            subprocess.Popen(["cmd", "/c", "start", "", local_path], shell=False)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"No se pudo abrir el video: {e}")
+
+    return {"status": "ok", "message": "Abriendo en el reproductor predeterminado de Windows."}
 
 
 async def _build_videos_page(
@@ -64,14 +90,14 @@ async def _build_videos_page(
 
     where_clause = "WHERE oculto = 0"
     if thumb_filter == "con":
-        where_clause = f"{where_clause} AND has_thumb = 1"
+        where_clause = f"{where_clause} AND has_thumb > 0"
     elif thumb_filter == "sin":
         where_clause = f"{where_clause} AND has_thumb = 0"
     if extra_where:
         where_clause = f"{where_clause} AND {extra_where}"
     if buscar:
-        where_clause = f"{where_clause} AND (nombre LIKE ? OR caption LIKE ?)"
-        extra_params = (*extra_params, f"%{buscar}%", f"%{buscar}%")
+        where_clause = f"{where_clause} AND (nombre LIKE ? OR caption LIKE ? or file_unique_id LIKE ?)"
+        extra_params = (*extra_params, f"%{buscar}%", f"%{buscar}%", f"%{buscar}%")
 
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -85,9 +111,28 @@ async def _build_videos_page(
         
         async with db.execute(
             f"""
-            SELECT chat_id, message_id, nombre, caption, tamano_bytes, file_unique_id, file_id,
-                   duracion, ancho, alto, mime_type, views, fecha_mensaje, watch_later, oculto, has_thumb,dump_message_id
-            FROM videos_telegram
+            SELECT vt.chat_id,
+                   vt.message_id,
+                   vt.nombre,
+                   vt.caption,
+                   vt.tamano_bytes,
+                   vt.file_unique_id,
+                   vt.file_id,
+                   vt.duracion,
+                   vt.ancho,
+                   vt.alto,
+                   vt.mime_type,
+                   vt.views,
+                   vt.fecha_mensaje,
+                   vt.watch_later,
+                   vt.oculto,
+                   vt.has_thumb,
+                   vt.dump_message_id,
+                   vt.ruta_local,
+                   c.name AS chat_name,
+                   c.username AS chat_username
+            FROM videos_telegram vt
+            LEFT JOIN chats c ON c.chat_id = vt.chat_id
             {where_clause}
             ORDER BY {order_clause}
             LIMIT ? OFFSET ?
@@ -123,6 +168,8 @@ async def _build_videos_page(
     for r in (rows or []):
         video_id = r["file_unique_id"]
         chat_id = r["chat_id"]
+        local_path = r["ruta_local"]
+        is_downloaded = bool(local_path and os.path.exists(local_path))
 
         items.append(
             {
@@ -148,6 +195,10 @@ async def _build_videos_page(
                 "oculto": (r["oculto"]),
                 "has_thumb": (r["has_thumb"]),
                 "dump_message_id": r["dump_message_id"],
+                "local_path": local_path,
+                "downloaded": is_downloaded,
+                "chat_name": r["chat_name"],
+                "chat_username": r["chat_username"],
             }
         )
 

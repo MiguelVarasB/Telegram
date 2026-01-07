@@ -12,6 +12,10 @@ async def db_upsert_chat_basic(
     name: str | None,
     chat_type: str | None,
     username: str | None,
+    is_owner: bool | int = False,
+    is_public: bool | int = False,
+    has_protected_content: bool | int = False,
+    activo: bool | int = False,
     raw_json: str | None = None,
     last_message_date: str | None = None,
 ) -> None:
@@ -19,13 +23,21 @@ async def db_upsert_chat_basic(
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
-            INSERT INTO chats (chat_id, name, type, photo_id, username, raw_json, last_message_date, updated_at)
-            VALUES (?, ?, ?, NULL, ?, ?, ?, ?)
+            INSERT INTO chats (
+                chat_id, name, type, photo_id, username,
+                raw_json, last_message_date, updated_at,
+                is_owner, is_public, has_protected_content, activo
+            )
+            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET
                 name=excluded.name,
                 type=excluded.type,
                 username=excluded.username,
                 raw_json=excluded.raw_json,
+                is_owner=excluded.is_owner,
+                is_public=excluded.is_public,
+                has_protected_content=excluded.has_protected_content,
+                activo=excluded.activo,
                 last_message_date=COALESCE(excluded.last_message_date, chats.last_message_date),
                 updated_at=excluded.updated_at
             """,
@@ -37,18 +49,26 @@ async def db_upsert_chat_basic(
                 raw_json,
                 last_message_date,
                 datetime.datetime.utcnow().isoformat(),
+                1 if is_owner else 0,
+                1 if is_public else 0,
+                1 if has_protected_content else 0,
+                1 if activo else 0,
             ),
         )
         await db.commit()
 
 
-async def db_upsert_chat_from_ci(ci, last_message_date: str | None = None):
+async def db_upsert_chat_from_ci(ci, last_message_date: str | None = None, activo: bool | int = False):
     """Guarda/actualiza un chat resuelto en la base de datos (Asíncrono)."""
     chat_id = ci.id
     name = ci.title or getattr(ci, "first_name", None) or "Sin Nombre"
     chat_type = str(ci.type).replace("ChatType.", "") if getattr(ci, "type", None) else None
     photo_id = ci.photo.small_file_id if getattr(ci, "photo", None) else None
     username = getattr(ci, "username", None)
+    is_owner = getattr(ci, "is_creator", False) or getattr(ci, "is_self", False)
+    is_public = bool(username)
+    has_protected_content = getattr(ci, "has_protected_content", False)
+    
     
     try:
         raw_dict = json.loads(str(ci))
@@ -58,14 +78,22 @@ async def db_upsert_chat_from_ci(ci, last_message_date: str | None = None):
 
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
-            INSERT INTO chats (chat_id, name, type, photo_id, username, raw_json, last_message_date, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO chats (
+                chat_id, name, type, photo_id, username,
+                raw_json, last_message_date, updated_at,
+                is_owner, is_public, has_protected_content, activo
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET
                 name=excluded.name,
                 type=excluded.type,
                 photo_id=excluded.photo_id,
                 username=excluded.username,
                 raw_json=excluded.raw_json,
+                is_owner=excluded.is_owner,
+                is_public=excluded.is_public,
+                has_protected_content=excluded.has_protected_content,
+                activo=excluded.activo,
                 last_message_date=COALESCE(excluded.last_message_date, chats.last_message_date),
                 updated_at=excluded.updated_at
         """, (
@@ -77,6 +105,10 @@ async def db_upsert_chat_from_ci(ci, last_message_date: str | None = None):
             raw_json,
             last_message_date,
             datetime.datetime.utcnow().isoformat(),
+            1 if is_owner else 0,
+            1 if is_public else 0,
+            1 if has_protected_content else 0,
+            1 if activo else 0,
         ))
         await db.commit()
 
@@ -85,7 +117,14 @@ async def db_get_chat(chat_id: int) -> dict | None:
     """Obtiene un chat guardado por ID de forma ASÍNCRONA."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT chat_id, name, type, photo_id, username, raw_json, last_message_date FROM chats WHERE chat_id = ?",
+            """
+            SELECT
+                chat_id, name, type, photo_id, username,
+                raw_json, last_message_date, is_owner,
+                is_public, has_protected_content
+            FROM chats
+            WHERE chat_id = ?
+            """,
             (chat_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -101,6 +140,9 @@ async def db_get_chat(chat_id: int) -> dict | None:
                 "username": row[4],
                 "raw_json": row[5],
                 "last_message_date": row[6],
+                "is_owner": row[7],
+                "is_public": row[8],
+                "has_protected_content": row[9],
             }
 
 

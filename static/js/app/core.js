@@ -70,6 +70,10 @@
     dom.statsOverlay = document.getElementById('stats-modal-overlay');
     dom.statsClose = document.getElementById('stats-modal-close-btn');
     dom.statsContent = document.getElementById('stats-modal-content');
+    dom.downloadsButton = document.getElementById('btn-downloads');
+    dom.downloadsOverlay = document.getElementById('downloads-modal-overlay');
+    dom.downloadsClose = document.getElementById('downloads-modal-close-btn');
+    dom.downloadsContent = document.getElementById('downloads-modal-content');
     dom.btnSyncFaltantes = document.getElementById('btn-sync-faltantes');
 
     // --- Lazy load de fotos de canal ---
@@ -190,6 +194,191 @@
         items.forEach(function (el) { applyWatchLaterStateToElement(el); });
     }
 
+    // --- Descargas en tarjetas ---
+    state.cardDownloadsPoll = state.cardDownloadsPoll || null;
+    state.emptyDownloadPolls = 0;
+
+    // --- Reproducir local en Windows (sin abrir nueva página) ---
+    async function openWithWindowsPlayer(btn) {
+        if (!btn) return;
+        const url = btn.getAttribute('href');
+        if (!url) return;
+        if (btn.dataset.opening === '1') return;
+        btn.dataset.opening = '1';
+        const originalHtml = btn.innerHTML;
+        try {
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            btn.style.opacity = '0.8';
+            const res = await fetch(url, { method: 'GET' });
+            if (!res.ok) {
+                const msg = await res.text().catch(() => '');
+                alert(`No se pudo abrir el reproductor (HTTP ${res.status}). ${msg || ''}`);
+                return;
+            }
+            // No hacemos nada más: el endpoint ya lanza el reproductor en el servidor.
+        } catch (e) {
+            alert('No se pudo abrir el reproductor predeterminado.');
+        } finally {
+            btn.innerHTML = originalHtml;
+            btn.style.opacity = '';
+            delete btn.dataset.opening;
+        }
+    }
+
+    document.addEventListener('click', function (ev) {
+        const playBtn = ev.target.closest('.btn-play');
+        if (!playBtn) return;
+        // Evitar navegación; solo llamamos al endpoint
+        ev.preventDefault();
+        ev.stopPropagation();
+        openWithWindowsPlayer(playBtn);
+    });
+
+    function applyDownloadStatusToCards(list) {
+        if (!Array.isArray(list)) return;
+        const downloadingIds = new Set(
+            list.filter(d => d.status === 'downloading' && d.video_id).map(d => d.video_id)
+        );
+        const cards = document.querySelectorAll('.file-item[data-item-type="video"]');
+        cards.forEach(function (card) {
+            const vid = card.dataset.videoId;
+            const row = card.querySelector('[data-download-status]');
+            const btn = card.querySelector('.btn-download[data-action="download"]');
+            if (!row) return;
+            if (downloadingIds.has(vid)) {
+                row.style.display = 'flex';
+                row.dataset.downloading = '1';
+                if (btn) btn.style.display = 'none';
+            } else if (row.dataset.downloading) {
+                row.style.display = 'none';
+                delete row.dataset.downloading;
+                if (btn) btn.style.display = '';
+            }
+        });
+        if (downloadingIds.size === 0) {
+            state.manualDownloadStarted = false;
+        }
+    }
+
+    async function pollDownloadsForCards() {
+        try {
+            const res = await fetch('/api/downloads/status');
+            if (!res.ok) return;
+            const data = await res.json();
+            if (!data || data.length === 0) {
+                state.emptyDownloadPolls = (state.emptyDownloadPolls || 0) + 1;
+                const shouldStop = !state.manualDownloadStarted && state.emptyDownloadPolls >= 3;
+                if (shouldStop) {
+                    stopCardDownloadsPolling();
+                }
+            } else {
+                state.emptyDownloadPolls = 0;
+                applyDownloadStatusToCards(data);
+            }
+        } catch (e) {
+            // silencioso
+            stopCardDownloadsPolling();
+        }
+    }
+
+    function startCardDownloadsPolling() {
+        if (state.cardDownloadsPoll) return;
+        pollDownloadsForCards();
+        state.cardDownloadsPoll = setInterval(pollDownloadsForCards, 2000);
+    }
+
+    function stopCardDownloadsPolling() {
+        if (state.cardDownloadsPoll) {
+            clearInterval(state.cardDownloadsPoll);
+            state.cardDownloadsPoll = null;
+        }
+        state.manualDownloadStarted = false;
+        state.emptyDownloadPolls = 0;
+    }
+
+    // --- Descarga completa ---
+    async function startDownload(card, btn) {
+        if (!card) return;
+        const chatId = card.dataset.chatId;
+        const messageId = card.dataset.messageId;
+        const videoId = card.dataset.videoId;
+        const videoName = card.dataset.name;
+        if (!chatId || !messageId || !videoId) {
+            console.warn('Faltan datos para descargar', { chatId, messageId, videoId });
+            return;
+        }
+        state.manualDownloadStarted = true;
+        state.emptyDownloadPolls = 0;
+        startCardDownloadsPolling();
+
+        const statusRow = card.querySelector('[data-download-status]');
+        const originalBtnHtml = btn ? btn.innerHTML : null;
+        const originalBtnDisplay = btn ? btn.style.display : null;
+
+        if (btn) {
+            btn.disabled = true;
+            btn.classList.add('is-loading');
+            btn.setAttribute('aria-busy', 'true');
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            btn.style.display = 'none';
+        }
+        if (statusRow) {
+            statusRow.style.display = 'flex';
+            statusRow.dataset.downloading = '1';
+        }
+        const cancelBtn = card.querySelector('.btn-cancel-download');
+        if (cancelBtn) {
+            cancelBtn.disabled = false;
+            cancelBtn.style.display = 'inline-flex';
+            cancelBtn.onclick = async (ev) => {
+                ev.stopPropagation();
+                cancelBtn.disabled = true;
+                try {
+                    await fetch(`/api/downloads/cancel/${chatId}/${messageId}/${videoId}`, { method: 'POST' });
+                } catch (e) {
+                    // silencioso
+                } finally {
+                    cancelBtn.disabled = false;
+                }
+            };
+        }
+
+        try {
+            const params = new URLSearchParams({ video_id: videoId });
+            if (videoName) params.append('video_name', videoName);
+            const res = await fetch(`/api/download/${chatId}/${messageId}?${params.toString()}`, { method: 'POST' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            if (data.status === 'ready') {
+                window.open(`/api/download/file/${chatId}/${videoId}`, '_blank');
+                if (statusRow) {
+                    statusRow.style.display = 'none';
+                    delete statusRow.dataset.downloading;
+                }
+            } else {
+                behaviors.openDownloadsModal?.();
+            }
+        } catch (e) {
+            console.warn('No se pudo iniciar la descarga', e);
+            alert('No se pudo iniciar la descarga. Intenta nuevamente.');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.classList.remove('is-loading');
+                btn.removeAttribute('aria-busy');
+                if (originalBtnHtml) btn.innerHTML = originalBtnHtml;
+                if (originalBtnDisplay !== null) btn.style.display = originalBtnDisplay;
+            }
+            if (statusRow && btn?.disabled === false) {
+                // Si falló, ocultamos el indicador
+                statusRow.style.display = 'none';
+                delete statusRow.dataset.downloading;
+            }
+            const cancelBtn2 = card.querySelector('.btn-cancel-download');
+            if (cancelBtn2) cancelBtn2.style.display = 'none';
+        }
+    }
+
     function updateWatchLaterButton() {
         if (!dom.watchLaterButton) return;
         if (!state.currentVideoId || !state.currentVideoElement) {
@@ -302,19 +491,22 @@
     }
 
     // --- Hover Previews ---
-    // Carga un video preview al hacer hover sobre cards de video.
+    // Carga un video preview al hacer hover solo sobre el link del thumb.
     function setupHoverPreviews() {
-        const cards = document.querySelectorAll('.file-item[data-item-type="video"]');
-        cards.forEach(function (card) {
-            if (card.dataset.hoverInitialized === '1') return;
-            card.dataset.hoverInitialized = '1';
+        const links = document.querySelectorAll('.video-thumb-link');
+        links.forEach(function (link) {
+            if (link.dataset.hoverInitialized === '1') return;
+            link.dataset.hoverInitialized = '1';
 
-            card.addEventListener('mouseenter', function () {
+            const card = link.closest('.file-item[data-item-type="video"]');
+            if (!card) return;
+
+            function startHover() {
                 if (card.dataset.previewActive === '1' || card.dataset.previewLoading === '1') return;
                 const streamUrl = card.dataset.streamUrl;
                 if (!streamUrl) return;
 
-                const box = card.querySelector('.icon-box.video-box');
+                const box = link.querySelector('.icon-box.video-box');
                 if (!box) return;
 
                 const spinner = box.querySelector('.video-loading-spinner');
@@ -323,7 +515,7 @@
                 card.dataset.previewLoading = '1';
 
                 const timerId = setTimeout(function () {
-                    if (!card.matches(':hover')) {
+                    if (!link.matches(':hover')) {
                         card.dataset.previewLoading = '0';
                         if (spinner) spinner.style.display = 'none';
                         return;
@@ -341,7 +533,7 @@
                     preview.playbackRate = 2.0;
 
                     preview.addEventListener('loadeddata', function () {
-                        if (!card.matches(':hover')) return;
+                        if (!link.matches(':hover')) return;
                         preview.classList.add('is-visible');
                         if (spinner) spinner.style.display = 'none';
                         card.dataset.previewLoading = '0';
@@ -357,16 +549,16 @@
                 }, 500);
 
                 card.dataset.previewTimer = String(timerId);
-            });
+            }
 
-            card.addEventListener('mouseleave', function () {
+            function stopHover() {
                 const timerId = card.dataset.previewTimer;
                 if (timerId) {
                     clearTimeout(Number(timerId));
                     delete card.dataset.previewTimer;
                 }
 
-                const box = card.querySelector('.icon-box.video-box');
+                const box = link.querySelector('.icon-box.video-box');
                 if (box) {
                     const preview = box.querySelector('video.video-preview');
                     if (preview) {
@@ -379,7 +571,10 @@
 
                 card.dataset.previewActive = '0';
                 card.dataset.previewLoading = '0';
-            });
+            }
+
+            link.addEventListener('mouseenter', startHover);
+            link.addEventListener('mouseleave', stopHover);
         });
     }
 
@@ -392,11 +587,23 @@
         applyHiddenStateToAll,
         applyWatchLaterStateToElement,
         applyWatchLaterStateToAll,
+        applyDownloadStatusToCards,
+        startCardDownloadsPolling,
         updateWatchLaterButton,
         updateHideVideoButton,
         applyDuplicateFilter,
         setupHoverPreviews,
         setupLazyChatPhotos,
         saveHiddenVideos,
+    });
+
+    // Delegación: click en botón Descargar de cada card
+    document.addEventListener('click', function (event) {
+        const btn = event.target.closest('.btn-download');
+        if (!btn) return;
+        const card = btn.closest('.file-item[data-item-type="video"]');
+        if (!card) return;
+        event.preventDefault();
+        startDownload(card, btn);
     });
 })();

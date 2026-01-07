@@ -21,6 +21,7 @@ from routes import (
     sync_router,
     search_router,
     duplicates_router,
+    tags_router,
 )
 
 # Logging: silenciar trazas ruidosas por defecto (configurable via LOG_LEVEL env)
@@ -73,6 +74,7 @@ app.include_router(media_api_router)
 app.include_router(sync_router)
 app.include_router(search_router)
 app.include_router(duplicates_router)
+app.include_router(tags_router)
 
 # Montar archivos estáticos
 app.mount("/static", StaticFiles(directory="static"), name="static")

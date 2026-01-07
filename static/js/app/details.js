@@ -19,6 +19,8 @@
         const views = el.dataset.views || '';
         const caption = el.dataset.caption || '';
         const chatId = el.dataset.chatId || '';
+        const chatName = el.dataset.chatName || '';
+        const chatUsername = el.dataset.chatUsername || '';
         const messageId = el.dataset.messageId || '';
         const fileUniqueId = el.dataset.fileUniqueId || '';
         const messagesCount = el.dataset.messagesCount || '';
@@ -41,11 +43,19 @@
         if (dom.detailsCaption) dom.detailsCaption.textContent = caption;
 
         const idParts = [];
-        if (chatId) idParts.push('Chat ID: ' + chatId);
-        if (messageId) idParts.push('Mensaje ID: ' + messageId);
-        if (fileUniqueId) idParts.push('File Unique ID: ' + fileUniqueId);
+        if (chatId) {
+            const chatLabel = helpers.escapeHtmlStats(
+                chatName || (chatUsername ? '@' + chatUsername : 'Canal ' + chatId)
+            );
+            const chatLink = chatUsername
+                ? `https://t.me/${encodeURIComponent(chatUsername)}`
+                : `/channel/${encodeURIComponent(chatId)}`;
+            idParts.push(`Canal: <a href="${chatLink}" target="_blank" rel="noopener noreferrer">${chatLabel}</a>`);
+        }
+        if (messageId) idParts.push('Mensaje ID: ' + helpers.escapeHtmlStats(messageId));
+        if (fileUniqueId) idParts.push('File Unique ID: ' + helpers.escapeHtmlStats(fileUniqueId));
         if (messagesCount) idParts.push('Mensajes asociados: ' + helpers.formatThousands(messagesCount));
-        if (dom.detailsIds) dom.detailsIds.textContent = idParts.join(' · ');
+        if (dom.detailsIds) dom.detailsIds.innerHTML = idParts.join(' · ');
 
         if (dom.detailsWatchLaterPill) {
             dom.detailsWatchLaterPill.style.display = watchLaterFlag ? 'block' : 'none';

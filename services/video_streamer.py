@@ -75,7 +75,10 @@ class TelegramVideoSender:
                 self.message = await self.client.get_messages(self.chat_id, self.message_id)
                 if self.message:
                     media = self.message.video or self.message.document
-                    self.total_size = media.file_size
+                    if not media:
+                        raise ValueError(f"Mensaje {self.message_id} sin media (video/document)")
+
+                    self.total_size = getattr(media, "file_size", 0) or 0
                     self.mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
                     
                     # ACTUALIZAR CACHE CON METADATOS
@@ -83,6 +86,7 @@ class TelegramVideoSender:
                         cached = get_from_ram(self.video_id)
                         store_in_ram(self.video_id, cached['data'], self.total_size, self.mime_type, self.message)
                     
+                    print(f" [Stream] Setup LENTO desde TELEGRAM (ID: {self.message_id})")
                     print(f"☁️ [Stream] Setup LENTO desde TELEGRAM (ID: {self.message_id})")
                     return
             except OSError as e:
@@ -182,8 +186,10 @@ class TelegramVideoSender:
                     break
 
         except asyncio.CancelledError:
+            # El cliente (navegador) suele cancelar el stream al cambiar de rango o cerrar el modal.
+            # No lo tratamos como error para evitar 500 innecesarios.
             print(f"🛑 [Stream] Cliente canceló conexión (Video {self.video_id}).")
-            raise  # Re-lanzar para notificar a FastAPI y cerrar sockets
+            return
         except Exception as e:
             print(f"❌ [Stream] Error inesperado: {e}")
             raise e

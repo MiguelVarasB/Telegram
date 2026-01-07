@@ -11,7 +11,7 @@ from pyrogram.errors import FloodWait, FileReferenceExpired
 from config import THUMB_FOLDER, GRUPOS_THUMB_FOLDER, DB_PATH, CACHE_DUMP_VIDEOS_CHANNEL_ID
 from services import get_client
 from services.thumb_worker_hibrido import _descargar_con_cliente
-from utils import save_image_as_webp
+from utils import save_image_as_webp,log_timing
 from database import db_get_video_messages
 from .media_common import thumb_download_sem, thumb_db_cache
 
@@ -246,6 +246,8 @@ async def get_photo(
 
 @router.get("/api/stats")
 async def api_stats(limit: int = 10):
+    log_timing("api_stats")
+    EXCLUDE_CHAT_ID = -1003512635282
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("PRAGMA table_info(videos_telegram)") as cursor:
             columns = await cursor.fetchall()
@@ -253,95 +255,106 @@ async def api_stats(limit: int = 10):
         has_dump_fail = "dump_fail" in col_names
         has_dump_message_id = "dump_message_id" in col_names
 
-        async with db.execute("SELECT COUNT(*) FROM videos_telegram") as cursor:
-            total_videos = (await cursor.fetchone() or [0])[0] or 0
-
-        async with db.execute("SELECT COUNT(DISTINCT file_unique_id) FROM videos_telegram") as cursor:
-            unique_videos = (await cursor.fetchone() or [0])[0] or 0
-
-        async with db.execute("SELECT COUNT(*) FROM videos_telegram WHERE has_thumb = 0") as cursor:
-            videos_sin_thumb = (await cursor.fetchone() or [0])[0] or 0
-
-        async with db.execute("SELECT COUNT(*) FROM videos_telegram WHERE es_vertical = 1") as cursor:
-            videos_verticales = (await cursor.fetchone() or [0])[0] or 0
-
-        async with db.execute("SELECT COUNT(*) FROM videos_telegram WHERE duracion >= 3600") as cursor:
-            videos_largos = (await cursor.fetchone() or [0])[0] or 0
-
-        if has_dump_message_id:
-            async with db.execute(
-                """
-                SELECT v.chat_id,
-                       COALESCE(c.name, CAST(v.chat_id AS TEXT)) AS name,
-                       c.username,
-                       COUNT(*) AS sin_thumb,
-                       (SELECT COUNT(*) FROM videos_telegram vt WHERE vt.chat_id = v.chat_id) AS total_videos,
-                       (SELECT COUNT(*) FROM videos_telegram vt WHERE vt.chat_id = v.chat_id AND vt.dump_message_id IS NOT NULL) AS dump_videos
-                FROM videos_telegram v
-                LEFT JOIN chats c ON c.chat_id = v.chat_id
-                WHERE v.has_thumb = 0
-                  AND v.chat_id != ?
-                GROUP BY v.chat_id, c.username, c.name
-                ORDER BY sin_thumb DESC
-                LIMIT ?
-                """,
-                (CACHE_DUMP_VIDEOS_CHANNEL_ID, limit),
-            ) as cursor:
-                top_no_thumb_rows = await cursor.fetchall()
-        else:
-            async with db.execute(
-                """
-                SELECT v.chat_id,
-                       COALESCE(c.name, CAST(v.chat_id AS TEXT)) AS name,
-                       c.username,
-                       COUNT(*) AS sin_thumb
-                FROM videos_telegram v
-                LEFT JOIN chats c ON c.chat_id = v.chat_id
-                WHERE v.has_thumb = 0
-                  AND v.chat_id != ?
-                GROUP BY v.chat_id, c.username, c.name
-                ORDER BY sin_thumb DESC
-                LIMIT ?
-                """,
-                (CACHE_DUMP_VIDEOS_CHANNEL_ID, limit),
-            ) as cursor:
-                top_no_thumb_rows = await cursor.fetchall()
-
+        # Totales rápidos desde tabla resumida si existe
         async with db.execute(
             """
+            SELECT
+                SUM(videos_count) AS total_videos,
+                SUM(videos_count - COALESCE(duplicados, 0)) AS unique_videos_aprox,
+                SUM(COALESCE(duplicados, 0)) AS duplicados_total,
+                SUM(COALESCE(indexados, 0)) AS indexados_total
+            FROM chat_video_counts
+            WHERE chat_id != ?
+            """
+        , (EXCLUDE_CHAT_ID,)) as cursor:
+            row = await cursor.fetchone() or [0, 0, 0, 0]
+            (
+                total_videos,
+                unique_videos,
+                duplicados_total,
+                indexados_total,
+            ) = [r or 0 for r in row]
+
+        # Conteos globales restantes desde videos_telegram (sin DISTINCT costoso)
+        async with db.execute(
+            """
+            SELECT
+                SUM(CASE WHEN has_thumb = 0 THEN 1 ELSE 0 END) AS videos_sin_thumb,
+                SUM(CASE WHEN es_vertical = 1 THEN 1 ELSE 0 END) AS videos_verticales,
+                SUM(CASE WHEN duracion >= 3600 THEN 1 ELSE 0 END) AS videos_largos
+            FROM videos_telegram
+            WHERE chat_id != ?
+            """
+        , (EXCLUDE_CHAT_ID,)) as cursor:
+            row = await cursor.fetchone() or [0, 0, 0]
+            videos_sin_thumb, videos_verticales, videos_largos = [r or 0 for r in row]
+
+        dump_videos_select = (
+            "SUM(CASE WHEN v.dump_message_id IS NOT NULL THEN 1 ELSE 0 END) AS dump_videos,"
+            if has_dump_message_id
+            else "0 AS dump_videos,"
+        )
+        blocked_select = (
+            "SUM(CASE WHEN v.dump_fail = 1 AND v.dump_message_id IS NULL THEN 1 ELSE 0 END) AS blocked"
+            if has_dump_fail and has_dump_message_id
+            else "0 AS blocked"
+        )
+
+        async with db.execute(
+            f"""
             SELECT v.chat_id,
                    COALESCE(c.name, CAST(v.chat_id AS TEXT)) AS name,
                    c.username,
-                   COUNT(*) AS videos
+                   SUM(CASE WHEN v.has_thumb = 0 THEN 1 ELSE 0 END) AS sin_thumb,
+                   COALESCE(cv.videos_count, 0) AS total_videos,
+                   {dump_videos_select}
+                   {blocked_select}
             FROM videos_telegram v
             LEFT JOIN chats c ON c.chat_id = v.chat_id
-            WHERE v.chat_id != ?
+            LEFT JOIN chat_video_counts cv ON cv.chat_id = v.chat_id
+            WHERE v.chat_id NOT IN (?, ?)
             GROUP BY v.chat_id, c.username, c.name
-            ORDER BY videos DESC
+            HAVING sin_thumb > 0
+            ORDER BY sin_thumb DESC
             LIMIT ?
             """,
-            (CACHE_DUMP_VIDEOS_CHANNEL_ID, limit),
+            (CACHE_DUMP_VIDEOS_CHANNEL_ID, EXCLUDE_CHAT_ID, limit),
+        ) as cursor:
+            top_no_thumb_rows = await cursor.fetchall()
+
+        async with db.execute(
+            """
+            SELECT cv.chat_id,
+                   COALESCE(c.name, CAST(cv.chat_id AS TEXT)) AS name,
+                   c.username,
+                   cv.videos_count
+            FROM chat_video_counts cv
+            LEFT JOIN chats c ON c.chat_id = cv.chat_id
+            WHERE cv.chat_id NOT IN (?, ?)
+            ORDER BY cv.videos_count DESC
+            LIMIT ?
+            """,
+            (CACHE_DUMP_VIDEOS_CHANNEL_ID, EXCLUDE_CHAT_ID, limit),
         ) as cursor:
             top_groups_rows = await cursor.fetchall()
 
         restricted_rows = []
         if has_dump_fail and has_dump_message_id:
             async with db.execute(
-                """
+                f"""
                 SELECT v.chat_id,
                        COALESCE(c.name, CAST(v.chat_id AS TEXT)) AS name,
                        c.username,
-                       COUNT(*) AS blocked
+                       {blocked_select}
                 FROM videos_telegram v
                 LEFT JOIN chats c ON c.chat_id = v.chat_id
-                WHERE v.dump_fail = 1
-                  AND v.dump_message_id IS NULL
-                  AND v.chat_id != ?
+                WHERE v.chat_id NOT IN (?, ?)
                 GROUP BY v.chat_id, c.username, c.name
+                HAVING blocked > 0
                 ORDER BY blocked DESC
                 LIMIT ?
                 """,
-                (CACHE_DUMP_VIDEOS_CHANNEL_ID, limit),
+                (CACHE_DUMP_VIDEOS_CHANNEL_ID, EXCLUDE_CHAT_ID, limit),
             ) as cursor:
                 restricted_rows = await cursor.fetchall()
 
@@ -397,7 +410,7 @@ async def api_stats(limit: int = 10):
                 "telegram_link": build_link(chat_id),
             }
         )
-
+    log_timing("Entrega datos")
     return {
         "total_videos": total_videos,
         "unique_videos": unique_videos,

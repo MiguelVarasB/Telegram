@@ -83,7 +83,7 @@
                         const durationText = item.duration ? `${Math.floor(item.duration / 60)}:${(item.duration % 60).toString().padStart(2, '0')}` : '';
                         const name = (item.text || item.file_name || 'Video').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                         const sizeTxt = item.file_size ? `${(item.file_size / (1024 * 1024)).toFixed(1)} MB` : '';
-                        html += '<a href="' + link + '" class="file-item" data-item-type="video"'
+                        html += '<div class="file-item" data-item-type="video"'
                             + ' data-stream-url="' + link.replace('/play/', '/video_stream/') + '"'
                             + (item.id ? ' data-video-id="' + String(item.id) + '"' : '')
                             + (item.chat_id ? ' data-chat-id="' + String(item.chat_id) + '"' : '')
@@ -93,16 +93,17 @@
                             + (item.date ? ' data-date="' + String(item.date) + '"' : '')
                             + (item.text ? ' data-caption="' + String(item.text).replace(/"/g, '&quot;') + '"' : '')
                             + '>';
-                        html += '<div class="icon-box video-box">'
+                        html += '<a href="' + link + '" class="video-thumb-link" aria-label="Abrir video">'
+                            + '<div class="icon-box video-box">'
                             + '<div class="video-hidden-indicator" title="Marcado como oculto"><i class="fas fa-eye-slash"></i></div>'
                             + '<div class="video-watchlater-indicator" title="Guardado para ver más tarde"><i class="fas fa-clock"></i></div>'
                             + '<div class="video-loading-spinner" aria-hidden="true"><i class="fas fa-circle-notch fa-spin"></i></div>'
                             + '<i class="fas fa-file-video file-video"></i>';
                         if (durationText) html += '<div class="video-duration">' + durationText + '</div>';
-                        html += '</div>'
+                        html += '</div></a>'
                             + '<div class="file-name" title="' + name + '">' + name + '</div>'
                             + '<div class="file-info">' + (sizeTxt || '') + '</div>'
-                            + '</a>';
+                            + '</div>';
                     });
                 } else if (type === 'chat') {
                     items.forEach((item) => {

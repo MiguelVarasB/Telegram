@@ -153,7 +153,19 @@ async def db_upsert_video_message(message_data: dict) -> None:
         await _ensure_video_messages_table(db)
 
         from_user = message_data.get("from_user") or {}
+        if not isinstance(from_user, dict):
+            from_user = {
+                "id": getattr(from_user, "id", None),
+                "username": getattr(from_user, "username", None),
+                "is_bot": getattr(from_user, "is_bot", False),
+            }
+
         forward_from_chat = message_data.get("forward_from_chat") or {}
+        if not isinstance(forward_from_chat, dict):
+            forward_from_chat = {
+                "id": getattr(forward_from_chat, "id", None),
+                "title": getattr(forward_from_chat, "title", None),
+            }
 
         await db.execute("""
             INSERT INTO video_messages (

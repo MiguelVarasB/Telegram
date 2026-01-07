@@ -67,26 +67,21 @@
                 <option value="chat">Chats/Canales</option>
                 <option value="archivo">Archivos</option>
             </select>
-            {% if current_channel_name is defined or current_channel_id is defined %}
-            <div class="pill current-channel-pill" title="Grupo/Canal actual">
-                <i class="fas fa-hashtag"></i>
-                <span>
-                    {{ current_channel_name if current_channel_name is defined else "" }}
-                    {% if current_channel_id is defined %} ({{ current_channel_id }}){% endif %}
-                </span>
-            </div>
-            {% endif %}
+            
             <button type="submit" class="btn-search">
                 <i class="fas fa-search"></i>
             </button>
         </form>
 
-        <button id="btn-stats" class="btn-stats" type="button">Estadísticas</button>
-        <a href="/videos" class="btn-video-link btn-stats" title="Ver videos">
-            <i class="fa-solid fa-video"></i> Videos
+        <button id="btn-stats" class="btn-stats" type="button" title="Estadísticas"><i class="fa-solid fa-chart-simple"></i></button>
+        <button id="btn-downloads" class="btn-stats" type="button" title="Descargas"><i class="fa-solid fa-download"></i></button>
+        <a href="/videos" class="btn-video-link btn-stats" title="Ver videos"><i class="fa-solid fa-video"></i> 
         </a>
         <a href="/watch_later" class="btn-watchlater-link btn-stats" title="Ver más tarde">
-            <i class="fas fa-clock"></i> Ver Luego
+            <i class="fas fa-clock"></i> 
+        </a>
+        <a href="/tags" class="btn-stats" title="Mantenedor de Tags">
+            <i class="fas fa-tags"></i> Tags
         </a>
     </div>
 </div>

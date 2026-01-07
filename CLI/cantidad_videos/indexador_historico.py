@@ -6,6 +6,8 @@ import sys
 import aiosqlite
 from pyrogram.errors import FloodWait
 
+"""Resumen: Recorre hacia atrás chats con videos ya indexados para recuperar históricos y marcar last_hist_scan en chat_video_counts."""
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import DB_PATH,CACHE_DUMP_VIDEOS_CHANNEL_ID  # noqa: E402

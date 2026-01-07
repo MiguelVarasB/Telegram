@@ -29,7 +29,7 @@ async def ver_home(request: Request):
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT COUNT(*) FROM videos_telegram WHERE has_thumb = 1"
+                "SELECT COUNT(*) FROM videos_telegram WHERE has_thumb > 0"
             ) as cursor:
                 row = await cursor.fetchone()
                 videos_total = int((row[0] if row else 0) or 0)

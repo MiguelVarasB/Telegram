@@ -2,6 +2,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+"""Resumen: Recalcula chat_video_counts.indexados desde videos_telegram y reinicia duplicados a 0, garantizando la columna indexados si falta."""
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))

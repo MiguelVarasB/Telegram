@@ -322,7 +322,7 @@ Notas:
   - Query params:
     - `page` (default 1)
     - `per_page` (default 60)
-  - Criterio de thumb: `has_thumb = 1` y existe archivo en `dumps/thumbs/videos/{chat_id}/{file_unique_id}.webp`.
+  - Criterio de thumb: `has_thumb > 0` y existe archivo en `dumps/thumbs/videos/{chat_id}/{file_unique_id}.webp`.
 - `GET /play/{chat_id}/{message_id}` → Página del reproductor, detectando si el video ya está descargado en disco.
 - `GET /video_stream/{chat_id}/{message_id}` → Streaming híbrido Disco → RAM → Telegram con soporte de rangos HTTP.
 - `POST /api/download/{chat_id}/{message_id}` → Dispara la descarga completa del video al SSD en segundo plano.

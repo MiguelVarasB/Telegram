@@ -2,6 +2,7 @@ import os
 import asyncio
 import aiosqlite
 import sys
+import random
 from pyrogram.errors import FloodWait
 from typing import Dict, List, Tuple
 
@@ -20,9 +21,9 @@ from config import (
 from services.telegram_client import get_client
 from utils import save_image_as_webp, log_timing
 # --- CONFIGURACIÓN ---
-LIMITE = 20  # Cantidad de videos a procesar en esta vuelta
+LIMITE =1000  # Cantidad de videos a procesar en esta vuelta
 BATCH =   30  # Tamaño del paquete de reenvío (No subir de 30)
-SLEEP_ENVIO = 5
+SLEEP_ENVIO = (3, 10)  # rango de espera aleatoria entre envíos
 MAX_CHATS_CONCURRENTES = 3  # cuántos chats se procesan en paralelo
 
 async def check_database_schema():
@@ -133,7 +134,7 @@ async def main():
             msg_ids = [v[2] for v in chunk]  # Solo los IDs de los mensajes
 
             try:
-                print(f"   ➡️ Reenviando {len(chunk)} videos del chat {chat_origin}...", end=" ")
+                log_timing(f"➡️ Reenviando {len(chunk)} videos del chat {chat_origin}...")
 
                 # REENVÍO
                 nuevos_msgs = await app.forward_messages(
@@ -143,7 +144,11 @@ async def main():
                 )
 
                 if not isinstance(nuevos_msgs, list):
-                    nuevos_msgs = [nuevos_msgs]
+                    nuevos_msgs = [nuevos_msgs] if nuevos_msgs else []
+
+                if not nuevos_msgs:
+                    log_timing(f"⚠️ Sin reenviar (lista vacía) para chat {chat_origin}")
+                    continue
 
                 # ACTUALIZAR BD
                 async with aiosqlite.connect(DB_PATH) as db:
@@ -158,8 +163,8 @@ async def main():
                     await db.commit()
 
                 total_ok += len(nuevos_msgs)
-                log_timing("✅")
-                await asyncio.sleep(SLEEP_ENVIO)  # Pausa de seguridad
+                log_timing(f"✅ Reenviados {len(nuevos_msgs)} del chat {chat_origin}")
+                await asyncio.sleep(random.uniform(*SLEEP_ENVIO))  # Pausa de seguridad
 
             except FloodWait as e:
                 log_timing(f"\n⏳ FloodWait: Esperando {e.value} segundos...")
