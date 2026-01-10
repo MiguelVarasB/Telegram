@@ -18,6 +18,7 @@ async def db_upsert_chat_basic(
     activo: bool | int = False,
     raw_json: str | None = None,
     last_message_date: str | None = None,
+    ultimo_escaneo: str | None = None,
 ) -> None:
     """Inserta/actualiza un chat con los campos mínimos (Asíncrono)."""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -25,10 +26,10 @@ async def db_upsert_chat_basic(
             """
             INSERT INTO chats (
                 chat_id, name, type, photo_id, username,
-                raw_json, last_message_date, updated_at,
+                raw_json, last_message_date, ultimo_escaneo, updated_at,
                 is_owner, is_public, has_protected_content, activo
             )
-            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET
                 name=excluded.name,
                 type=excluded.type,
@@ -39,6 +40,7 @@ async def db_upsert_chat_basic(
                 has_protected_content=excluded.has_protected_content,
                 activo=excluded.activo,
                 last_message_date=COALESCE(excluded.last_message_date, chats.last_message_date),
+                ultimo_escaneo=COALESCE(excluded.ultimo_escaneo, chats.ultimo_escaneo),
                 updated_at=excluded.updated_at
             """,
             (
@@ -48,6 +50,7 @@ async def db_upsert_chat_basic(
                 username,
                 raw_json,
                 last_message_date,
+                ultimo_escaneo,
                 datetime.datetime.utcnow().isoformat(),
                 1 if is_owner else 0,
                 1 if is_public else 0,
@@ -80,10 +83,10 @@ async def db_upsert_chat_from_ci(ci, last_message_date: str | None = None, activ
         await db.execute("""
             INSERT INTO chats (
                 chat_id, name, type, photo_id, username,
-                raw_json, last_message_date, updated_at,
+                raw_json, last_message_date, ultimo_escaneo, updated_at,
                 is_owner, is_public, has_protected_content, activo
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET
                 name=excluded.name,
                 type=excluded.type,
@@ -95,6 +98,7 @@ async def db_upsert_chat_from_ci(ci, last_message_date: str | None = None, activ
                 has_protected_content=excluded.has_protected_content,
                 activo=excluded.activo,
                 last_message_date=COALESCE(excluded.last_message_date, chats.last_message_date),
+                ultimo_escaneo=COALESCE(excluded.ultimo_escaneo, chats.ultimo_escaneo),
                 updated_at=excluded.updated_at
         """, (
             chat_id,
@@ -104,6 +108,7 @@ async def db_upsert_chat_from_ci(ci, last_message_date: str | None = None, activ
             username,
             raw_json,
             last_message_date,
+            None,
             datetime.datetime.utcnow().isoformat(),
             1 if is_owner else 0,
             1 if is_public else 0,

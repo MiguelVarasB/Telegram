@@ -137,6 +137,7 @@ async def init_db():
                 username TEXT,
                 raw_json TEXT,
                 last_message_date TEXT,
+                ultimo_escaneo TEXT,
                 updated_at TEXT
             )
         """)
@@ -222,7 +223,7 @@ async def _run_migrations(db: aiosqlite.Connection):
     """Ejecuta migraciones necesarias en la base de datos."""
     # Verificar y agregar columnas faltantes
     tables = {
-        "chats": ["last_message_date"],
+        "chats": ["last_message_date", "ultimo_escaneo"],
         "chat_video_counts": ["duplicados", "indexados"],
         "videos_telegram": ["watch_later", "thumb_bytes", "has_thumb", 
                            "tamano_bytes", "duracion", "nombre", "fecha_mensaje"]
@@ -238,6 +239,7 @@ async def _run_migrations(db: aiosqlite.Connection):
                     logger.info(f"Añadiendo columna {column} a la tabla {table}")
                     await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} " + {
                         "last_message_date": "TEXT",
+                        "ultimo_escaneo": "TEXT",
                         "duplicados": "INTEGER DEFAULT 0",
                         "indexados": "INTEGER DEFAULT 0",
                         "watch_later": "INTEGER DEFAULT 0",

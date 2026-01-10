@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from collections import deque
+from pathlib import Path
 from typing import Iterable, Tuple
 
 import aiosqlite
@@ -11,8 +12,11 @@ from pyrogram import enums
 from pyrogram.errors import FloodWait
 
 """Resumen: Sincroniza videos faltantes por canal usando search_messages (VIDEO) hasta un máximo configurado."""
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+## NO USAR EN EL PIPELINE###
+# Asegurar import desde la raíz del proyecto (Telegram)
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from config import DB_PATH  # noqa: E402
 from database import (  # noqa: E402
@@ -29,14 +33,17 @@ async def get_chats_incompletos(max_chats: int | None = None) -> Iterable[Tuple[
     donde indexados < videos_count.
     """
     query = """
-        SELECT chat_id,
-               videos_count,
-               indexados,
-               COALESCE(duplicados, 0) AS duplicados,
-               (videos_count - COALESCE(duplicados, 0) - COALESCE(indexados, 0)) AS faltantes
-        FROM chat_video_counts
-        WHERE videos_count IS NOT NULL AND videos_count > 0
-          AND (videos_count - COALESCE(duplicados, 0) - COALESCE(indexados, 0)) > 0
+        SELECT cvc.chat_id,
+               cvc.videos_count,
+               cvc.indexados,
+               COALESCE(cvc.duplicados, 0) AS duplicados,
+               (cvc.videos_count - COALESCE(cvc.duplicados, 0) - COALESCE(cvc.indexados, 0)) AS faltantes
+        FROM chat_video_counts cvc
+        JOIN chats c ON c.chat_id = cvc.chat_id
+        WHERE cvc.videos_count IS NOT NULL AND cvc.videos_count > 0
+          AND c.activo = 1
+          AND COALESCE(c.is_owner, 0) = 0
+          AND (cvc.videos_count - COALESCE(cvc.duplicados, 0) - COALESCE(cvc.indexados, 0)) > 0
         ORDER BY faltantes DESC
     """
     params: tuple = ()
@@ -105,6 +112,8 @@ async def sync_faltantes_por_busqueda(
             batch_size = 100
             offset = 0
 
+            detener_chat = False
+
             while True:
                 batch: deque = deque()
                 try:
@@ -145,15 +154,49 @@ async def sync_faltantes_por_busqueda(
                         consecutivos_existentes += 1
                         count_existing += 1
                         fn = v.file_name or f"Video {m.id}"
-                        print(f"  ℹ️  Ya existe: {fn[:40]} (consecutivos: {consecutivos_existentes}/{consecutivos_para_detener})")
-                        
+                        print(
+                            f"  ℹ️  Ya existe: {fn[:40]} | msg_id={m.id} | chat_id={chat_id} "
+                            f"(consecutivos: {consecutivos_existentes}/{consecutivos_para_detener})"
+                        )
+                        # Asegurar que el mensaje quede registrado aunque el video ya exista
+                        msg_dict = json.loads(str(m))
+                        msg_from = getattr(m, "from_user", None)
+                        fwd_chat = msg_dict.get("forward_from_chat") or {}
+                        message_data = {
+                            "video_id": v.file_unique_id,
+                            "chat_id": chat_id,
+                            "message_id": m.id,
+                            "date": m.date.isoformat() if m.date else None,
+                            "from_user": {
+                                "id": getattr(msg_from, "id", None),
+                                "username": getattr(msg_from, "username", None),
+                                "is_bot": getattr(msg_from, "is_bot", False),
+                            }
+                            if msg_from
+                            else {},
+                            "media": msg_dict.get("media"),
+                            "views": m.views or 0,
+                            "forwards": getattr(m, "forwards", None),
+                            "outgoing": int(m.outgoing) if m.outgoing is not None else None,
+                            "reply_to_message_id": getattr(m, "reply_to_message_id", None),
+                            "forward_from_chat": fwd_chat,
+                            "forward_from_message_id": msg_dict.get("forward_from_message_id"),
+                            "forward_date": msg_dict.get("forward_date"),
+                            "caption": m.caption,
+                        }
+
+                        await db_upsert_video_message(message_data)
+
+                        # Chequear umbral inmediatamente para no seguir dentro del batch
                         if consecutivos_existentes >= consecutivos_para_detener:
                             print(f"  🛑 Deteniendo: {consecutivos_para_detener} videos consecutivos ya existentes")
+                            detener_chat = True
                             break
+
                     else:
                         # Video nuevo - resetear contador de consecutivos
                         consecutivos_existentes = 0
-                        
+
                         fn = v.file_name or f"Video {m.id}"
                         msg_dict = json.loads(str(m))
 
@@ -204,12 +247,16 @@ async def sync_faltantes_por_busqueda(
                         await db_upsert_video_message(message_data)
 
                         count_new += 1
-                        print(f"  ✅ Nuevo: {fn[:40]} (total nuevos: {count_new})")
-                    
+
+                    # Avanzar offset siempre, para paginar correctamente
                     offset += 1
-                
-                # Salir si se alcanzó el límite de consecutivos
-                if consecutivos_existentes >= consecutivos_para_detener:
+
+                    # Log solo para los nuevos
+                    if not ya_existe:
+                        print(f"  ✅ Nuevo: {fn[:40]} (total nuevos: {count_new})")
+
+                # Salir si se alcanzó el límite de consecutivos dentro del batch
+                if detener_chat:
                     break
 
                 if len(batch) < batch_size:

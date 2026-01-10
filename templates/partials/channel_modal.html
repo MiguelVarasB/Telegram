@@ -18,106 +18,108 @@
 </div>
 
 <script>
-// Fallback ligero por si el listener global no se monta
+// Fallback ligero por si el listener global no se monta (versión jQuery)
 (function () {
-    if (window.__channelModalInitialized) return;
-    window.__channelModalInitialized = true;
-    const overlay = document.getElementById('channel-modal-overlay');
-    const closeBtn = document.getElementById('channel-modal-close');
-    const $overlay = window.jQuery ? window.jQuery('#channel-modal-overlay') : null;
-    const $closeBtn = window.jQuery ? window.jQuery('#channel-modal-close') : null;
-    const $openBtn = window.jQuery ? window.jQuery('#channel-modal-open') : null;
-    const $statusEl = window.jQuery ? window.jQuery('#channel-modal-status') : null;
-    const titleEl = document.getElementById('channel-modal-title');
-    const metaEl = document.getElementById('channel-modal-meta');
-    const statusEl = document.getElementById('channel-modal-status');
-    const scanBtn = document.getElementById('channel-modal-scan');
-    const openBtn = document.getElementById('channel-modal-open');
-    let chatId = null;
-    let chatHref = null;
-    function fillMeta(data) {
-         console.log(data);
-        if (!metaEl) return;
-        const parts = [];
-        if (data.type) parts.push(`Tipo: ${data.type}`);
-        if (data.username) parts.push(`Usuario: @${data.username}`);
-        parts.push(`Indexados / Totales: ${(data.indexed_videos||0)} / ${(data.total_videos||0)}`);
-    
-        if (data.scanned_at) parts.push(`Último escaneo: ${data.scanned_at}`);
-        if (data.last_message_date) parts.push(`Último mensaje: ${data.last_message_date}`);
-        metaEl.innerHTML = parts.map(t => `<div>${t}</div>`).join('');
-    }
-    async function fetchInfo(id) {
-        if (!id) return;
-        try {
-            const res = await fetch(`/api/channel/${encodeURIComponent(id)}/info`);
-            if (!res.ok) throw new Error();
-            const data = await res.json();
-            fillMeta(data);
-            if (statusEl) statusEl.textContent = '';
-        } catch (e) {
-            if (statusEl) statusEl.textContent = 'Error al cargar info del canal';
-        }
-    }
-    function openModal(btn) {
-        chatId = btn.dataset.chatId || null;
-        chatHref = btn.closest('.file-item')?.getAttribute('href') || null;
-        if (titleEl) titleEl.textContent = btn.dataset.chatName || 'Canal';
-        fillMeta({
-            type: btn.dataset.chatType,
-            username: btn.dataset.username,
-            indexed_videos: btn.dataset.indexed,
-            total_videos: btn.dataset.total,
-            scanned_at: btn.dataset.scannedAt,
-            last_message_date: btn.dataset.lastMessage,
-        });
-        if (statusEl) statusEl.textContent = 'Cargando info...';
-        if ($overlay) {
-            $overlay.stop(true, true).css('display', 'flex').hide().fadeIn(150);
-        } else {
-            overlay?.classList.add('is-open');
-            overlay?.classList.remove('is-closed');
-            if (overlay) overlay.style.display = 'flex';
-        }
-        fetchInfo(chatId);
-    }
-    document.addEventListener('click', function(ev) {
-        const btn = ev.target.closest('.open-channel-modal');
-        if (!btn) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        openModal(btn);
-    });
+    function bootChannelModal() {
+        if (window.__channelModalInitialized) return true;
+        if (!window.jQuery) return false; // esperamos a que cargue jQuery
+        window.__channelModalInitialized = true;
+        const $ = window.jQuery;
+        const $overlay = $('#channel-modal-overlay');
+        const $closeBtn = $('#channel-modal-close');
+        const $openBtn = $('#channel-modal-open');
+        const $statusEl = $('#channel-modal-status');
+        const $titleEl = $('#channel-modal-title');
+        const $metaEl = $('#channel-modal-meta');
+        const $scanBtn = $('#channel-modal-scan');
+        let chatId = null;
+        let chatHref = null;
 
-    function closeModal() {
-        if ($overlay) {
+        function fillMeta(data) {
+            if (!$metaEl.length) return;
+            if (window.App?.behaviors?.fillChannelMeta) {
+                try { window.App.behaviors.fillChannelMeta(data); } catch (e) {}
+                return;
+            }
+            const parts = [];
+            if (data.type) parts.push(`Tipo: ${data.type}`);
+            if (data.username) parts.push(`Usuario: @${data.username}`);
+            parts.push(`Indexados / Totales: ${(data.indexed_videos||0)} / ${(data.total_videos||0)}`);
+            if (data.scanned_at) parts.push(`Último escaneo: ${data.scanned_at}`);
+            if (data.last_message_date) parts.push(`Último mensaje: ${data.last_message_date}`);
+            $metaEl.html(parts.map(t => `<div>${t}</div>`).join(''));
+        }
+
+        async function fetchInfo(id) {
+            if (!id) return;
+            try {
+                const res = await fetch(`/api/channel/${encodeURIComponent(id)}/info`);
+                if (!res.ok) throw new Error();
+                const data = await res.json();
+                fillMeta(data);
+                $statusEl.text('');
+            } catch (e) {
+                $statusEl.text('Error al cargar info del canal');
+            }
+        }
+
+        function openModal(btn) {
+            const $btn = $(btn);
+            chatId = $btn.data('chatId') || null;
+            chatHref = $btn.closest('.file-item').attr('href') || null;
+            if ($titleEl.length) $titleEl.text($btn.data('chatName') || 'Canal');
+            fillMeta({
+                type: $btn.data('chatType'),
+                username: $btn.data('username'),
+                indexed_videos: $btn.data('indexed'),
+                total_videos: $btn.data('total'),
+                scanned_at: $btn.data('scannedAt'),
+                last_message_date: $btn.data('lastMessage'),
+            });
+            $statusEl.text('Cargando info...');
+            $overlay.stop(true, true).css('display', 'flex').hide().fadeIn(150);
+            fetchInfo(chatId);
+        }
+
+        function closeModal() {
             $overlay.stop(true, true).fadeOut(150, function() {
                 $overlay.css('display', 'none');
-                if ($statusEl && $statusEl.length) $statusEl.text('');
+                $statusEl.text('');
             });
-        } else {
-            overlay?.classList.remove('is-open');
-            overlay?.classList.add('is-closed');
-            if (overlay) overlay.style.display = 'none';
-            if (statusEl) statusEl.textContent = '';
         }
-    }
 
-    if ($closeBtn) $closeBtn.on('click', closeModal);
-    else closeBtn?.addEventListener('click', closeModal);
+        $(document).on('click', '.open-channel-modal', function(ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            openModal(this);
+        });
 
-    if ($overlay) {
+        $closeBtn.on('click', closeModal);
+
         $overlay.on('click', function(ev) {
             if (ev.target === this) closeModal();
         });
-    } else {
-        overlay?.addEventListener('click', function(ev) {
-            if (ev.target === overlay) closeModal();
+
+        $openBtn.on('click', function() {
+            if (chatHref) window.location.href = chatHref;
+            else if (chatId) window.location.href = `/channel/${encodeURIComponent(chatId)}`;
         });
+
+        // Compatibilidad con onclick inline en cards
+        window.openChannelModalFromButton = function(btn) {
+            openModal(btn);
+            return false;
+        };
+
+        return true;
     }
-    openBtn?.addEventListener('click', function() {
-        if (chatHref) window.location.href = chatHref;
-        else if (chatId) window.location.href = `/channel/${encodeURIComponent(chatId)}`;
-    });
+
+    // Intentar iniciar; si no hay jQuery aún, reintentar al cargar DOM/load
+    if (!bootChannelModal()) {
+        document.addEventListener('DOMContentLoaded', bootChannelModal);
+        window.addEventListener('load', bootChannelModal);
+        // pequeño retardo por si jQuery llega justo después
+        setTimeout(bootChannelModal, 200);
+    }
 })();
 </script>

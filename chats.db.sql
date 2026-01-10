@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS "chats" (
 	"raw_json"	TEXT,
 	"updated_at"	TEXT,
 	"last_message_date"	TEXT,
+	"ultimo_escaneo"	TEXT,
 	"is_owner"	INTEGER DEFAULT 0,
 	"is_public"	INTEGER DEFAULT 0,
 	"has_protected_content"	INTEGER DEFAULT 0,

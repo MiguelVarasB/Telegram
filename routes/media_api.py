@@ -275,17 +275,16 @@ async def api_stats(limit: int = 10):
                 indexados_total,
             ) = [r or 0 for r in row]
 
-        # Conteos globales restantes desde videos_telegram (sin DISTINCT costoso)
+        # Conteos globales optimizados con subconsultas para usar índices existentes
         async with db.execute(
             """
-            SELECT
-                SUM(CASE WHEN has_thumb = 0 THEN 1 ELSE 0 END) AS videos_sin_thumb,
-                SUM(CASE WHEN es_vertical = 1 THEN 1 ELSE 0 END) AS videos_verticales,
-                SUM(CASE WHEN duracion >= 3600 THEN 1 ELSE 0 END) AS videos_largos
-            FROM videos_telegram
-            WHERE chat_id != ?
-            """
-        , (EXCLUDE_CHAT_ID,)) as cursor:
+            SELECT 
+                (SELECT COUNT(*) FROM videos_telegram WHERE has_thumb = 0 AND chat_id != ?) AS videos_sin_thumb,
+                (SELECT COUNT(*) FROM videos_telegram WHERE es_vertical = 1 AND chat_id != ?) AS videos_verticales,
+                (SELECT COUNT(*) FROM videos_telegram WHERE duracion >= 3600 AND chat_id != ?) AS videos_largos
+            """,
+            (EXCLUDE_CHAT_ID, EXCLUDE_CHAT_ID, EXCLUDE_CHAT_ID),
+        ) as cursor:
             row = await cursor.fetchone() or [0, 0, 0]
             videos_sin_thumb, videos_verticales, videos_largos = [r or 0 for r in row]
 
@@ -300,27 +299,77 @@ async def api_stats(limit: int = 10):
             else "0 AS blocked"
         )
 
-        async with db.execute(
-            f"""
-            SELECT v.chat_id,
-                   COALESCE(c.name, CAST(v.chat_id AS TEXT)) AS name,
-                   c.username,
-                   SUM(CASE WHEN v.has_thumb = 0 THEN 1 ELSE 0 END) AS sin_thumb,
-                   COALESCE(cv.videos_count, 0) AS total_videos,
-                   {dump_videos_select}
-                   {blocked_select}
-            FROM videos_telegram v
-            LEFT JOIN chats c ON c.chat_id = v.chat_id
-            LEFT JOIN chat_video_counts cv ON cv.chat_id = v.chat_id
-            WHERE v.chat_id NOT IN (?, ?)
-            GROUP BY v.chat_id, c.username, c.name
-            HAVING sin_thumb > 0
-            ORDER BY sin_thumb DESC
-            LIMIT ?
-            """,
-            (CACHE_DUMP_VIDEOS_CHANNEL_ID, EXCLUDE_CHAT_ID, limit),
-        ) as cursor:
-            top_no_thumb_rows = await cursor.fetchall()
+        # Consulta optimizada con CTE para top sin thumb
+        if has_dump_message_id and has_dump_fail:
+            # Versión completa con dump y blocked
+            async with db.execute(
+                """
+                WITH sin_thumb_counts AS (
+                    SELECT chat_id, COUNT(*) as sin_thumb_count
+                    FROM videos_telegram 
+                    WHERE has_thumb = 0 AND chat_id NOT IN (?, ?)
+                    GROUP BY chat_id
+                    HAVING sin_thumb_count > 0
+                    ORDER BY sin_thumb_count DESC
+                    LIMIT ?
+                )
+                SELECT 
+                    stc.chat_id,
+                    COALESCE(c.name, CAST(stc.chat_id AS TEXT)) AS name,
+                    c.username,
+                    stc.sin_thumb_count AS sin_thumb,
+                    COALESCE(cv.videos_count, 0) AS total_videos,
+                    COALESCE(dump_counts.dump_videos, 0) AS dump_videos,
+                    COALESCE(blocked_counts.blocked, 0) AS blocked
+                FROM sin_thumb_counts stc
+                LEFT JOIN chats c ON c.chat_id = stc.chat_id
+                LEFT JOIN chat_video_counts cv ON cv.chat_id = stc.chat_id
+                LEFT JOIN (
+                    SELECT chat_id, COUNT(*) as dump_videos
+                    FROM videos_telegram 
+                    WHERE dump_message_id IS NOT NULL 
+                    GROUP BY chat_id
+                ) dump_counts ON dump_counts.chat_id = stc.chat_id
+                LEFT JOIN (
+                    SELECT chat_id, COUNT(*) as blocked
+                    FROM videos_telegram 
+                    WHERE dump_fail = 1 AND dump_message_id IS NULL 
+                    GROUP BY chat_id
+                ) blocked_counts ON blocked_counts.chat_id = stc.chat_id
+                ORDER BY stc.sin_thumb_count DESC
+                """,
+                (CACHE_DUMP_VIDEOS_CHANNEL_ID, EXCLUDE_CHAT_ID, limit),
+            ) as cursor:
+                top_no_thumb_rows = await cursor.fetchall()
+        else:
+            # Versión simplificada
+            async with db.execute(
+                """
+                WITH sin_thumb_counts AS (
+                    SELECT chat_id, COUNT(*) as sin_thumb_count
+                    FROM videos_telegram 
+                    WHERE has_thumb = 0 AND chat_id NOT IN (?, ?)
+                    GROUP BY chat_id
+                    HAVING sin_thumb_count > 0
+                    ORDER BY sin_thumb_count DESC
+                    LIMIT ?
+                )
+                SELECT 
+                    stc.chat_id,
+                    COALESCE(c.name, CAST(stc.chat_id AS TEXT)) AS name,
+                    c.username,
+                    stc.sin_thumb_count AS sin_thumb,
+                    COALESCE(cv.videos_count, 0) AS total_videos,
+                    0 AS dump_videos,
+                    0 AS blocked
+                FROM sin_thumb_counts stc
+                LEFT JOIN chats c ON c.chat_id = stc.chat_id
+                LEFT JOIN chat_video_counts cv ON cv.chat_id = stc.chat_id
+                ORDER BY stc.sin_thumb_count DESC
+                """,
+                (CACHE_DUMP_VIDEOS_CHANNEL_ID, EXCLUDE_CHAT_ID, limit),
+            ) as cursor:
+                top_no_thumb_rows = await cursor.fetchall()
 
         async with db.execute(
             """
@@ -376,9 +425,13 @@ async def api_stats(limit: int = 10):
 
     top_no_thumb_groups = []
     for r in (top_no_thumb_rows or []):
-        chat_id, name, username, sin_thumb, *rest = r
-        total_videos = rest[0] if rest else None
-        dump_videos = rest[1] if len(rest) > 1 else None
+        if len(r) >= 7:  # Versión completa con dump y blocked
+            chat_id, name, username, sin_thumb, total_videos, dump_videos, blocked = r
+        else:  # Versión simplificada
+            chat_id, name, username, sin_thumb, total_videos = r[:5]
+            dump_videos = 0
+            blocked = 0
+        
         percent_dump = 0
         if total_videos and dump_videos is not None:
             try:

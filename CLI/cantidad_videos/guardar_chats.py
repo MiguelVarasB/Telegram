@@ -1,21 +1,27 @@
 import asyncio
 import os
 import sys
+from pathlib import Path
 from typing import Optional
 
 import aiosqlite
 from pyrogram import enums
 from pyrogram.errors import FloodWait, RPCError
 
-# Permitir imports del proyecto
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Permitir imports del proyecto (raíz /Telegram)
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from services.telegram_client import get_client
 from services.unigram import obtener_fechas_y_ids
 from database import db_upsert_chat_from_ci
 from config import DB_PATH
 from utils import log_timing
-
+"""
+   el objetivo de este codigo, es obtener todos los chats (grupos, supergrupos y canales)
+    que tengo activos  y saber la fecha del  ultimo mensaje (usando puente con unigram)
+    """
 async def guardar_chats(limit: Optional[int] = None) -> None:
     """
     Recorre todos los diálogos del usuario (grupos, supergrupos y canales)
@@ -80,7 +86,14 @@ async def guardar_chats(limit: Optional[int] = None) -> None:
     finally:
         await client.stop()
         log_timing("🛑 Cliente de Telegram detenido")
-        log_timing(f"Resumen: vistos={total_vistos}, guardados/actualizados={guardados}")
+        ## contar chat activos segun la base de datos
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT COUNT(*) FROM chats WHERE activo = 1") as cursor:
+                row = await cursor.fetchone()
+             
+      
+
+        log_timing(f"Resumen: vistos={total_vistos}, guardados/actualizados={guardados} | chat activos: {row[0]}")
 
 
 if __name__ == "__main__":

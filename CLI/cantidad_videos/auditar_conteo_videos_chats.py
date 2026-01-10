@@ -8,7 +8,11 @@ from pyrogram import enums
 from pyrogram.errors import FloodWait
 
 """Resumen: Recorre todos tus diálogos y guarda en BD el conteo de videos por chat."""
-
+"""
+   el objetivo de este codigo es recorrer los chats activos de la base de datos, filtrando 
+   por la fecha del ultimo mensaje y si no tiene ultimo_escaneo.
+   y obtener desde la api de telegram el conteo de videos en cada chat.
+    """
 # Ajuste de ruta para tus servicios
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.telegram_client import get_client
@@ -47,19 +51,33 @@ async def contar_videos_en_todos_mis_chats():
         else:
             print("Modo refresco por escaneo reciente (<1h).")
         # 1. Obtenemos la lista de chats desde la base de datos (sin llamar a get_dialogs)
+        fecha_min = (ahora - datetime.timedelta(days=UMBRAL_DIAS)).isoformat()
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
                 """
-                SELECT c.chat_id, c.name, c.type, c.username, c.last_message_date, cv.scanned_at
+                SELECT
+                    c.chat_id,
+                    c.name,
+                    c.type,
+                    c.username,
+                    COALESCE(c.last_message_date, 'N/A') AS last_message_date,
+                    c.ultimo_escaneo,
+                    COALESCE(cv.videos_count, 0) AS videos_count_bd
                 FROM chats c
-                LEFT JOIN chat_video_counts cv ON cv.chat_id = c.chat_id
-                WHERE c.type IN ('CHANNEL','GROUP','SUPERGROUP')
-                AND c.activo = 1
-                """
+                LEFT JOIN chat_video_counts cv ON c.chat_id = cv.chat_id
+                WHERE c.activo = 1
+                  AND COALESCE(c.is_owner, 0) = 0
+                  AND (
+                        c.ultimo_escaneo IS NULL
+                     OR c.last_message_date > datetime('now', ? || ' days')
+                  )
+                ORDER BY c.last_message_date DESC
+                """,
+                (fecha_min,),
             ) as cur:
                 chats_rows = await cur.fetchall()
 
-        for chat_id, name, chat_type, username, last_msg_str, scanned_at in chats_rows:
+        for chat_id, name, chat_type, username, last_msg_str, scanned_at, videos_count_bd in chats_rows:
             titulo = name or "Sin Nombre"
             # 2. Filtramos solo Grupos, Supergrupos y Canales (ya filtrado en SQL)
 
@@ -117,6 +135,7 @@ async def contar_videos_en_todos_mis_chats():
                     chat_type=chat_type,
                     username=username,
                     raw_json=None,
+                    ultimo_escaneo=scanned_at,
                 )
                 await db_upsert_chat_video_count(chat_id, count, scanned_at)
                 
