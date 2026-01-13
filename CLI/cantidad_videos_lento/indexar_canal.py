@@ -16,14 +16,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import DB_PATH  # noqa: E402
 from database import (  # noqa: E402
-    db_add_video_file_id,
     db_count_videos_by_chat,
     db_upsert_chat_video_count,
-    db_upsert_video,
-    db_upsert_video_message,
 )
 from services.telegram_client import get_client  # noqa: E402
-from utils import log_timing
+from services.video_processor import procesar_mensaje_video  # noqa: E402
+
 
 async def get_chats_incompletos(max_chats: int | None = None) -> Iterable[Tuple[int, int, int | None, int, int]]:
     """
@@ -64,7 +62,7 @@ async def indexar_primeros_videos(
     client = get_client(clone_for_cli=True)
 
     await client.start()
-    log_timing("✅ Sesión Pyrogram iniciada (usuario).")
+    print("✅ Sesión Pyrogram iniciada (usuario).")
 
     try:
         chats = await get_chats_incompletos(max_chats=max_chats)
@@ -72,14 +70,14 @@ async def indexar_primeros_videos(
             chats = [row for row in chats if row[0] == only_chat_id]
 
         if not chats:
-            log_timing("No hay canales con indexación incompleta.")
+            print("No hay canales con indexación incompleta.")
             return
 
-        log_timing(f"Se procesarán {len(chats)} canales incompletos.")
+        print(f"Se procesarán {len(chats)} canales incompletos.")
 
         for chat_id, total_videos, indexados, duplicados, faltantes in chats:
             total_unicos = max(total_videos - duplicados, 0)
-            log_timing(
+            print(
                 f"\n📺 Canal {chat_id}: {indexados or 0} indexados / "
                 f"{total_unicos} únicos ({total_videos} totales, {duplicados} dupes). "
                 f"Faltan {faltantes}."
@@ -104,67 +102,24 @@ async def indexar_primeros_videos(
                         continue
                     seen_files.add(v.file_unique_id)
 
-                    fn = v.file_name or f"Video {m.id}"
-                    msg_dict = json.loads(str(m))
-
-                    video_data = {
-                        "chat_id": chat_id,
-                        "message_id": m.id,
-                        "file_id": v.file_id,
-                        "file_unique_id": v.file_unique_id,
-                        "nombre": fn,
-                        "caption": m.caption,
-                        "tamano_bytes": v.file_size,
-                        "fecha_mensaje": m.date.isoformat() if m.date else None,
-                        "duracion": v.duration or 0,
-                        "ancho": v.width or 0,
-                        "alto": v.height or 0,
-                        "mime_type": v.mime_type,
-                        "views": m.views or 0,
-                        "outgoing": m.outgoing,
-                    }
-                    await db_upsert_video(video_data)
-                    await db_add_video_file_id(v.file_unique_id, v.file_id, v.file_unique_id, "first100")
-
-                    msg_from = getattr(m, "from_user", None)
-                    fwd_chat = msg_dict.get("forward_from_chat") or {}
-                    message_data = {
-                        "video_id": v.file_unique_id,
-                        "chat_id": chat_id,
-                        "message_id": m.id,
-                        "date": m.date.isoformat() if m.date else None,
-                        "from_user_id": getattr(msg_from, "id", None),
-                        "from_username": getattr(msg_from, "username", None),
-                        "from_is_bot": int(getattr(msg_from, "is_bot", False)) if msg_from else None,
-                        "media_type": msg_dict.get("media"),
-                        "views": m.views or 0,
-                        "forwards": getattr(m, "forwards", None),
-                        "outgoing": int(m.outgoing) if m.outgoing is not None else None,
-                        "reply_to_message_id": getattr(m, "reply_to_message_id", None),
-                        "forward_from_chat_id": fwd_chat.get("id"),
-                        "forward_from_chat_title": fwd_chat.get("title"),
-                        "forward_from_message_id": msg_dict.get("forward_from_message_id"),
-                        "forward_date": msg_dict.get("forward_date"),
-                        "caption": msg_dict.get("caption"),
-                    }
-
-                    await db_upsert_video_message(message_data)
-
-                    count_new += 1
+                    resultado = await procesar_mensaje_video(m, origen="first100")
+                    
+                    if resultado["procesado"]:
+                        count_new += 1
                     if count_new % 25 == 0:
-                        log_timing(f"  · {count_new} videos procesados en {chat_id}...")
+                        print(f"  · {count_new} videos procesados en {chat_id}...")
 
             except FloodWait as e:
-                log_timing(f"⏳ FloodWait de {e.value}s en {chat_id}, esperando...")
+                print(f"⏳ FloodWait de {e.value}s en {chat_id}, esperando...")
                 await asyncio.sleep(e.value)
             except Exception as e:
-                log_timing(f"⚠️ Error escaneando {chat_id}: {e}")
+                print(f"⚠️ Error escaneando {chat_id}: {e}")
 
-            log_timing(f"✅ Canal {chat_id}: {count_new} videos guardados/actualizados.")
+            print(f"✅ Canal {chat_id}: {count_new} videos guardados/actualizados.")
 
     finally:
         await client.stop()
-        log_timing("🛑 Cliente de Telegram detenido")
+        print("🛑 Cliente de Telegram detenido")
 
 
 def _parse_args():

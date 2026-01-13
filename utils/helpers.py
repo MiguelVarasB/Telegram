@@ -10,9 +10,9 @@ from pyrogram.raw.functions.messages import GetChats
 from pyrogram.raw.functions.users import GetUsers
 from datetime import datetime
 
-def log_timing(msg: str):
+def log_timing(msg: str, end: str = "\n"):
     now = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    print(f"[{now}] {msg}")
+    print(f"[{now}] {msg}", end=end)
 
 def obtener_id_limpio(peer) -> int | None:
     """Extrae el ID limpio de un peer de Telegram."""

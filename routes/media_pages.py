@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request, Query, HTTPException
 from fastapi.templating import Jinja2Templates
 
 from config import TEMPLATES_DIR, THUMB_FOLDER, MAIN_TEMPLATE, DB_PATH,LIMIT_PER_PAGE
-from utils import convertir_tamano, formatear_miles
+from utils import convertir_tamano, formatear_miles, log_timing
 from .media_common import _build_page_links, _format_duration, get_video_info_from_db
 
 router = APIRouter()
@@ -14,6 +14,7 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 @router.get("/play/{chat_id}/{message_id}")
 async def player_page(request: Request, chat_id: int, message_id: int, file_unique_id: str | None = Query(None)):
+    log_timing(f" Iniciando endpoint /play/{chat_id}/{message_id}..")
     base_stream = f"/video_stream/{chat_id}/{message_id}"
     stream_url = f"{base_stream}?file_unique_id={file_unique_id}" if file_unique_id else base_stream
 
@@ -21,7 +22,7 @@ async def player_page(request: Request, chat_id: int, message_id: int, file_uniq
     video_id, local_path = await get_video_info_from_db(chat_id, message_id, file_unique_id)
     is_downloaded = local_path and os.path.exists(local_path)
 
-    return templates.TemplateResponse(
+    result = templates.TemplateResponse(
         MAIN_TEMPLATE,
         {
             "request": request,
@@ -33,6 +34,8 @@ async def player_page(request: Request, chat_id: int, message_id: int, file_uniq
             "is_downloaded": is_downloaded,
         },
     )
+    log_timing(f"Endpoint /play/{chat_id}/{message_id} terminado")
+    return result
 
 
 @router.get("/playwindows/{chat_id}/{message_id}")
@@ -264,10 +267,8 @@ async def all_videos_with_thumbs_page(
     thumb_filter: str = Query("con"),
     buscar: str = Query(""),
 ):
-  
-    
-   
-    return await _build_videos_page(
+    log_timing(f" Iniciando endpoint /videos..")
+    result = await _build_videos_page(
         request,
         page,
         per_page,
@@ -279,6 +280,8 @@ async def all_videos_with_thumbs_page(
         thumb_filter=thumb_filter,
         buscar =buscar,
     )
+    log_timing(f"Endpoint /videos terminado")
+    return result
 
 
 @router.get("/watch_later")
@@ -289,7 +292,8 @@ async def watch_later_page(
     sort: str = Query("fecha"),
     direction: str = Query("desc"),
 ):
-    return await _build_videos_page(
+    log_timing(" Iniciando endpoint /watch_later..")
+    result = await _build_videos_page(
         request,
         page,
         per_page,
@@ -300,3 +304,5 @@ async def watch_later_page(
         extra_where="watch_later = 1",
         view_type="files",
     )
+    log_timing("Endpoint /watch_later terminado")
+    return result

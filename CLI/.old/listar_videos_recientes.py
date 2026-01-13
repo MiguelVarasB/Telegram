@@ -12,11 +12,7 @@ from pyrogram.errors import FloodWait
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.telegram_client import get_client  # noqa: E402
-from database import (  # noqa: E402
-    db_add_video_file_id,
-    db_upsert_video,
-    db_upsert_video_message,
-)
+from services.video_processor import procesar_mensaje_video  # noqa: E402
 
 DIAS_ATRAS = 5
 
@@ -80,47 +76,8 @@ async def listar_videos_recientes(dias: int):
                     count_chat += 1
                     total_videos += 1
 
-                    # Guardar en base de datos
-                    video_data = {
-                        "chat_id": chat.id,
-                        "message_id": m.id,
-                        "file_id": v.file_id,
-                        "file_unique_id": v.file_unique_id,
-                        "nombre": v.file_name or f"Video {m.id}",
-                        "caption": m.caption,
-                        "tamano_bytes": v.file_size,
-                        "fecha_mensaje": m.date.isoformat() if m.date else None,
-                        "duracion": v.duration or 0,
-                        "ancho": v.width or 0,
-                        "alto": v.height or 0,
-                        "mime_type": v.mime_type,
-                        "views": m.views or 0,
-                        "outgoing": m.outgoing,
-                    }
-                    await db_upsert_video(video_data)
-                    await db_add_video_file_id(
-                        v.file_unique_id, v.file_id, v.file_unique_id, "listar_recientes"
-                    )
-
-                    message_data = {
-                        "video_id": v.file_unique_id,
-                        "chat_id": chat.id,
-                        "message_id": m.id,
-                        "date": m.date.isoformat() if m.date else None,
-                        "from_user": m.from_user.to_dict() if m.from_user else None,
-                        "media": getattr(m, "media", None),
-                        "views": m.views or 0,
-                        "forwards": getattr(m, "forwards", None),
-                        "outgoing": m.outgoing,
-                        "reply_to_message_id": getattr(m, "reply_to_message_id", None),
-                        "forward_from_chat": m.forward_from_chat.to_dict()
-                        if m.forward_from_chat
-                        else None,
-                        "forward_from_message_id": getattr(m, "forward_from_message_id", None),
-                        "forward_date": getattr(m, "forward_date", None),
-                        "caption": m.caption,
-                    }
-                    await db_upsert_video_message(message_data)
+                    # Guardar en base de datos usando el servicio centralizado
+                    await procesar_mensaje_video(m, origen="listar_recientes")
 
                     if count_chat % 25 == 0:
                         print(f"  · {count_chat} videos recientes encontrados en {chat.title}")

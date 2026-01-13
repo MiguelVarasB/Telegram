@@ -5,7 +5,7 @@ import sys
 import os
 
 """Resumen: Lista video_id duplicados en video_messages y opcionalmente muestra sus mensajes asociados."""
-from utils import log_timing
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH  # noqa: E402
 
@@ -55,23 +55,23 @@ def main():
 
     db_path = Path(DB_PATH)
     if not db_path.exists():
-        log_timing(f"No existe la BD en {db_path}")
+        print(f"No existe la BD en {db_path}")
         raise SystemExit(1)
 
     duplicados = encontrar_duplicados(args.limit)
     if not duplicados:
-        log_timing("No se encontraron duplicados en video_messages.")
+        print("No se encontraron duplicados en video_messages.")
         return
 
-    log_timing(f"Encontrados {len(duplicados)} video_id con más de una referencia (limit {args.limit}).")
+    print(f"Encontrados {len(duplicados)} video_id con más de una referencia (limit {args.limit}).")
     for row in duplicados:
         vid = row["video_id"]
         total = row["total"]
-        log_timing(f"\nvideo_id={vid} -> {total} mensajes")
+        print(f"\nvideo_id={vid} -> {total} mensajes")
         if args.detallar:
             mensajes = obtener_mensajes(vid)
             for m in mensajes:
-                log_timing(
+                print(
                     f"  chat={m['chat_id']} msg={m['message_id']} date={m['date']} "
                     f"views={m['views']} fwd={m['forwards']} caption={ (m['caption'] or '')[:80]}"
                 )

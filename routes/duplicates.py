@@ -23,7 +23,7 @@ except Exception:
     resnet18 = None  # type: ignore
 
 from config import CACHE_DUMP_VIDEOS_CHANNEL_ID, DB_PATH, MAIN_TEMPLATE, TEMPLATES_DIR, THUMB_FOLDER
-from utils import convertir_tamano
+from utils import convertir_tamano, log_timing
 
 router = APIRouter()
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -203,7 +203,8 @@ async def _ensure_thumb_phash_column(db: aiosqlite.Connection) -> None:
 
 @router.get("/duplicates")
 async def duplicates_page(request: Request):
-    return templates.TemplateResponse(
+    log_timing(" Iniciando endpoint /duplicates..")
+    result = templates.TemplateResponse(
         MAIN_TEMPLATE,
         {
             "request": request,
@@ -216,6 +217,8 @@ async def duplicates_page(request: Request):
             "dump_channel_id": CACHE_DUMP_VIDEOS_CHANNEL_ID,
         },
     )
+    log_timing("Endpoint /duplicates terminado")
+    return result
 
 
 @router.get("/api/duplicates")
@@ -234,6 +237,7 @@ async def api_duplicates(
     limit: int = Query(100, ge=1, le=200_000),
     min_group_size: int = Query(2, ge=2, le=50),
 ):
+    log_timing(" Iniciando endpoint /api/duplicates..")
     if not any([by_name, by_duration, by_video_size, by_thumb_size, by_similarity, by_thumb_phash, by_channel]):
         by_name = True
 
@@ -433,11 +437,13 @@ async def api_duplicates(
         reverse=True,
     )
 
-    return {
+    result = {
         "scanned": len(rows),
         "groups": out_groups,
         "groups_count": len(out_groups)
     }
+    log_timing("Endpoint /api/duplicates terminado")
+    return result
 
 
 @router.post("/api/duplicates/hide")

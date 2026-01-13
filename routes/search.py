@@ -9,6 +9,7 @@ from pyrogram import enums
 
 from config import DB_PATH
 from services import get_client
+from utils import log_timing
 
 router = APIRouter()
 
@@ -23,7 +24,10 @@ async def api_search(
     limit: int = Query(20, ge=1, le=100),
     chat_id: Optional[int] = Query(None),
 ):
-    return await _do_search(q, scope, type, limit, chat_id)
+    log_timing(f" Iniciando endpoint /search..")
+    result = await _do_search(q, scope, type, limit, chat_id)
+    log_timing(f"Endpoint /search terminado")
+    return result
 
 
 @router.get("/api/search")
@@ -35,7 +39,10 @@ async def api_search_alias(
     chat_id: Optional[int] = Query(None),
 ):
     # Alias para evitar 404 si el front apunta a /api/search
-    return await _do_search(q, scope, type, limit, chat_id)
+    log_timing(f" Iniciando endpoint /api/search..")
+    result = await _do_search(q, scope, type, limit, chat_id)
+    log_timing(f"Endpoint /api/search terminado")
+    return result
 
 
 async def _do_search(

@@ -9,6 +9,9 @@
             <div>Último escaneo: -</div>
             <div>Último mensaje: -</div>
         </div>
+        <div class="meta" id="data-pura" style="display: none;">
+            
+        </div>
         <div class="actions">
             <button type="button" class="btn-sync" id="channel-modal-scan">Indexar faltantes</button>
             <button type="button" class="channel-modal-open btn-light" id="channel-modal-open">Abrir canal</button>
@@ -57,9 +60,12 @@
                 if (!res.ok) throw new Error();
                 const data = await res.json();
                 fillMeta(data);
+                // Mostrar JSON completo en data-pura
+                $('#data-pura').text(JSON.stringify(data, null, 2)).show();
                 $statusEl.text('');
             } catch (e) {
                 $statusEl.text('Error al cargar info del canal');
+                $('#data-pura').hide();
             }
         }
 
@@ -77,6 +83,7 @@
                 last_message_date: $btn.data('lastMessage'),
             });
             $statusEl.text('Cargando info...');
+            $('#data-pura').hide().text(''); // Ocultar y limpiar JSON
             $overlay.stop(true, true).css('display', 'flex').hide().fadeIn(150);
             fetchInfo(chatId);
         }
@@ -85,6 +92,7 @@
             $overlay.stop(true, true).fadeOut(150, function() {
                 $overlay.css('display', 'none');
                 $statusEl.text('');
+                $('#data-pura').hide().text(''); // Limpiar JSON al cerrar
             });
         }
 

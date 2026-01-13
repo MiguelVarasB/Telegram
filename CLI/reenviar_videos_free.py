@@ -16,6 +16,7 @@ from pyrogram.raw.types import (
     PeerChannel,
 )
 from utils import save_image_as_webp, log_timing
+from utils.database_helpers import ensure_column
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Importamos tu configuración
@@ -37,12 +38,7 @@ ESPERA_CICLOS = 60*5
 
 async def check_database_schema():
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("PRAGMA table_info(videos_telegram)") as cursor:
-            columns = await cursor.fetchall()
-            col_names = [col[1] for col in columns]
-            if "dump_fail" not in col_names:
-                await db.execute("ALTER TABLE videos_telegram ADD COLUMN dump_fail INTEGER DEFAULT 0")
-                await db.commit()
+        await ensure_column(db, "videos_telegram", "dump_fail", "INTEGER", "0")
 
 async def marcar_fallidos(video_ids, razon):
     if not video_ids: return

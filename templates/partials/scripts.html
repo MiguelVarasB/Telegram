@@ -9,6 +9,11 @@ var SECCION='Home'
 {# Cache-buster simple para evitar F5 duro (número aleatorio) #}
 {% set V = range(1000000000) | random %}
 <script src="/static/js/helpers.js?v={{ V }}"></script>
+{# MQTT Client (Paho) - cargar antes que los demás scripts #}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
+<script src="/static/js/app/mqtt_client.js?v={{ V }}"></script>
+<script src="/static/js/app/mqtt_integration.js?v={{ V }}"></script>
+{# Scripts de la aplicación #}
 <script src="/static/js/app/core.js?v={{ V }}"></script>
 <script src="/static/js/app/details.js?v={{ V }}"></script>
 <script src="/static/js/app/modal_video.js?v={{ V }}"></script>

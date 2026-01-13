@@ -15,22 +15,10 @@ from pathlib import Path
 import aiosqlite
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT_DIR))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import DB_PATH, THUMB_FOLDER
-
-
-CREATE_COLUMN_SQL = """
-ALTER TABLE videos_telegram ADD COLUMN thumb_bytes INTEGER;
-"""
-
-
-async def ensure_column(db: aiosqlite.Connection) -> None:
-    async with db.execute("PRAGMA table_info(videos_telegram)") as cursor:
-        cols = [row[1] async for row in cursor]
-    if "thumb_bytes" not in cols:
-        await db.execute(CREATE_COLUMN_SQL)
-        await db.commit()
+from utils.database_helpers import ensure_column
 
 
 async def fetch_rows(db: aiosqlite.Connection, limit: int):
@@ -84,7 +72,7 @@ async def main():
     limit = max(1, args.limit)
 
     async with aiosqlite.connect(DB_PATH) as db:
-        await ensure_column(db)
+        await ensure_column(db, "videos_telegram", "thumb_bytes", "INTEGER")
         rows = await fetch_rows(db, limit)
         print(f"Filas a procesar: {len(rows)}")
         updated = await update_sizes(db, rows)

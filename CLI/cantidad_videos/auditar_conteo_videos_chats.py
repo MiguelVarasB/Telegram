@@ -23,7 +23,7 @@ from database import (
 )
 from database.chats import db_get_chat_scan_meta, db_get_chat
 from config import DB_PATH
-
+from utils import log_timing
 UMBRAL_DIAS = -1
 UMBRAL_MINUTOS = 180
 async def contar_videos_en_todos_mis_chats():
@@ -33,10 +33,10 @@ async def contar_videos_en_todos_mis_chats():
     if not client.is_connected:
         await client.start()
 
-    print("\n" + "="*70)
-    print("🎥 AUDITORÍA DE VIDEOS POR CANAL (MIS CHATS)")
-    print("="*70)
-    print(f"📡 Analizando diálogos (umbral de actividad: {UMBRAL_DIAS} días). Por favor espera.\n")
+    log_timing("\n" + "="*70)
+    log_timing("🎥 AUDITORÍA DE VIDEOS POR CANAL (MIS CHATS)")
+    log_timing("="*70)
+    log_timing(f"📡 Analizando diálogos (umbral de actividad: {UMBRAL_DIAS} días). Por favor espera.\n")
     
     resultados = []
     procesados = 0
@@ -47,9 +47,9 @@ async def contar_videos_en_todos_mis_chats():
         ahora = datetime.datetime.utcnow()
         umbral = ahora - datetime.timedelta(days=UMBRAL_DIAS) if UMBRAL_DIAS >= 0 else None
         if umbral:
-            print(f"fecha minima: {umbral.isoformat()}.\n")
+            log_timing(f"fecha minima: {umbral.isoformat()}.\n")
         else:
-            print("Modo refresco por escaneo reciente (<1h).")
+            log_timing("Modo refresco por escaneo reciente (<1h).")
         # 1. Obtenemos la lista de chats desde la base de datos (sin llamar a get_dialogs)
         fecha_min = (ahora - datetime.timedelta(days=UMBRAL_DIAS)).isoformat()
         async with aiosqlite.connect(DB_PATH) as db:
@@ -96,7 +96,7 @@ async def contar_videos_en_todos_mis_chats():
                         scanned_dt = datetime.datetime.fromisoformat(scanned_at)
                         if scanned_dt >= ahora - datetime.timedelta(minutes=UMBRAL_MINUTOS):
                             saltados += 1
-                            print(
+                            log_timing(
                                 f"⏭️ Saltado por escaneo reciente (<1h): {titulo[:30]}... "
                                 f"último_scan={scanned_dt.isoformat()} id={chat_id}"
                             )
@@ -105,19 +105,16 @@ async def contar_videos_en_todos_mis_chats():
                     pass
             else:
                 # Saltar si hay conteo previo y última fecha es > UMBRAL_DIAS días atrás
-                try:
-                    meta = await db_get_chat_scan_meta(chat_id)
-                    tiene_conteo = meta is not None and meta.get("videos_count") is not None
-                    if tiene_conteo and last_date and last_date < umbral:
-                        saltados += 1
-                        saltados_por_antiguedad += 1
-                        print(
-                            f"⏭️ Saltado por antigüedad (> {UMBRAL_DIAS}d): {titulo[:30]}... "
-                            f"última={last_date.isoformat()} id={chat_id}"
-                        )
-                        continue
-                except Exception:
-                    pass
+                # Usamos videos_count_bd que ya viene de la query principal
+                tiene_conteo = videos_count_bd is not None and videos_count_bd > 0
+                if tiene_conteo and last_date and last_date < umbral:
+                    saltados += 1
+                    saltados_por_antiguedad += 1
+                    log_timing(
+                        f"⏭️ Saltado por antigüedad (> {UMBRAL_DIAS}d): {titulo[:30]}... "
+                        f"última={last_date.isoformat()} id={chat_id}"
+                    )
+                    continue
 
             try:
                 fecha_log = last_date.isoformat() if last_date else "N/D"
@@ -147,36 +144,36 @@ async def contar_videos_en_todos_mis_chats():
                         "videos": count,
                         "fecha": fecha_log,
                     })
-                    print(f"✅ Procesado: {titulo[:30]}... ({count} videos) última={fecha_log}")
+                    log_timing(f"✅ Procesado: {titulo[:30]}... ({count} videos) última={fecha_log}")
                 else:
-                    print(f"ℹ️ Procesado: {titulo[:30]}... (0 videos) última={fecha_log}")
+                    log_timing(f"ℹ️ Procesado: {titulo[:30]}... (0 videos) última={fecha_log}")
                     
             except FloodWait as e:
                 # Si Telegram nos frena, esperamos lo que pida
-                print(f"⚠️ Esperando {e.value} segundos por límite de Flood...")
+                log_timing(f"⚠️ Esperando {e.value} segundos por límite de Flood...")
                 await asyncio.sleep(e.value)
             except Exception as err:
-                print(f"❌ Error en chat {chat_id}: {err}")
+                log_timing(f"❌ Error en chat {chat_id}: {err}")
                 continue
 
         # 4. Mostrar reporte final ordenado por cantidad de videos
-        print("\n" + "📊 REPORTE FINAL (Ordenado por volumen)")
-        print("-" * 75)
-        print(f"{'CANAL / GRUPO':<35} | {'VIDEOS':<10} | {'ID'}")
-        print("-" * 75)
+        log_timing("\n" + "📊 REPORTE FINAL (Ordenado por volumen)")
+        log_timing("-" * 75)
+        log_timing(f"{'CANAL / GRUPO':<35} | {'VIDEOS':<10} | {'ID'}")
+        log_timing("-" * 75)
         
         # Ordenamos de mayor a menor cantidad de videos
         resultados.sort(key=lambda x: x['videos'], reverse=True)
         
         for res in resultados:
-            print(f"{res['titulo']:<35} | {res['videos']:<10} | {res['id']}")
+            log_timing(f"{res['titulo']:<35} | {res['videos']:<10} | {res['id']}")
 
-        print("-" * 75)
-        print(f"✅ Total de canales con videos: {len(resultados)}")
-        print(f"📄 Procesados: {procesados} | Saltados: {saltados} (antigüedad>{UMBRAL_DIAS}d con conteo previo: {saltados_por_antiguedad})")
+        log_timing("-" * 75)
+        log_timing(f"✅ Total de canales con videos: {len(resultados)}")
+        log_timing(f"📄 Procesados: {procesados} | Saltados: {saltados} (antigüedad>{UMBRAL_DIAS}d con conteo previo: {saltados_por_antiguedad})")
 
     except Exception as e:
-        print(f"❌ Error general: {e}")
+        log_timing(f"❌ Error general: {e}")
     finally:
         await client.stop()
 

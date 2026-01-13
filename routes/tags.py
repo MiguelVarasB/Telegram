@@ -4,6 +4,7 @@ from pydantic import BaseModel, constr
 
 from config import TEMPLATES_DIR, MAIN_TEMPLATE
 from database import db_upsert_tag, db_list_tags
+from utils import log_timing
 
 
 class TagPayload(BaseModel):
@@ -18,7 +19,9 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 @router.get("/api/tags", summary="Lista todos los tags")
 async def list_tags():
+    log_timing(" Iniciando endpoint /api/tags..")
     tags = await db_list_tags()
+    log_timing("Endpoint /api/tags terminado")
     return {"items": tags, "total": len(tags)}
 
 
@@ -33,8 +36,9 @@ async def upsert_tag(payload: TagPayload):
 
 @router.get("/tags", summary="Vista mantenedor de tags", include_in_schema=False)
 async def tags_view(request: Request):
+    log_timing(" Iniciando endpoint /tags..")
     tags = await db_list_tags()
-    return templates.TemplateResponse(
+    result = templates.TemplateResponse(
         MAIN_TEMPLATE,
         {
             "request": request,
@@ -46,3 +50,5 @@ async def tags_view(request: Request):
             "parent_link": "/",
         },
     )
+    log_timing("Endpoint /tags terminado")
+    return result

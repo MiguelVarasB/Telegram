@@ -9,10 +9,8 @@ from pyrogram.errors import FloodWait
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.telegram_client import get_client
+from services.video_processor import procesar_mensaje_video
 from database import (
-    db_upsert_video,
-    db_add_video_file_id,
-    db_upsert_video_message,
     db_count_videos_by_chat,
 )
 
@@ -63,57 +61,12 @@ async def scan_all_channels_to_db(
                     if max_videos_per_chat is not None and count_new >= max_videos_per_chat:
                         break
 
-                    if not m.video:
+                    resultado = await procesar_mensaje_video(m, origen="scan_all", incluir_raw_json=True)
+                    
+                    if resultado["procesado"]:
+                        count_new += 1
+                    else:
                         continue
-
-                    v = m.video
-                    fn = v.file_name or f"Video {m.id}"
-                    msg_dict = json.loads(str(m))
-
-                    # ---- VIDEO PRINCIPAL (videos_telegram) ----
-                    video_data = {
-                        "chat_id": chat.id,
-                        "message_id": m.id,
-                        "file_id": v.file_id,
-                        "file_unique_id": v.file_unique_id,
-                        "nombre": fn,
-                        "caption": m.caption,
-                        "tamano_bytes": v.file_size,
-                        "fecha_mensaje": m.date.isoformat() if m.date else None,
-                        "duracion": v.duration or 0,
-                        "ancho": v.width or 0,
-                        "alto": v.height or 0,
-                        "mime_type": v.mime_type,
-                        "views": m.views or 0,
-                        "outgoing": m.outgoing,
-                    }
-                    await db_upsert_video(video_data)
-                    await db_add_video_file_id(
-                        v.file_unique_id, v.file_id, v.file_unique_id, "scan_all"
-                    )
-
-                    # ---- METADATOS EXTENDIDOS DEL MENSAJE (video_messages) ----
-                    message_data = {
-                        "video_id": v.file_unique_id,
-                        "chat_id": chat.id,
-                        "message_id": m.id,
-                        "date": m.date.isoformat() if m.date else None,
-                        "from_user": msg_dict.get("from_user"),
-                        "media": msg_dict.get("media"),
-                        "views": m.views or 0,
-                        "forwards": getattr(m, "forwards", None),
-                        "outgoing": m.outgoing,
-                        "reply_to_message_id": getattr(m, "reply_to_message_id", None),
-                        "forward_from_chat": msg_dict.get("forward_from_chat"),
-                        "forward_from_message_id": msg_dict.get("forward_from_message_id"),
-                        "forward_date": msg_dict.get("forward_date"),
-                        "caption": msg_dict.get("caption"),
-                        "caption_entities": msg_dict.get("caption_entities"),
-                        "raw_json": msg_dict,
-                    }
-                    await db_upsert_video_message(message_data)
-
-                    count_new += 1
                     if count_new % 50 == 0:
                         print(f"  · {count_new} videos procesados en {chat.title}...")
 

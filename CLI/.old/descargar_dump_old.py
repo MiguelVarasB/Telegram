@@ -21,13 +21,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Configuración
 from config import (
     DB_PATH, THUMB_FOLDER, API_ID, API_HASH, 
-    SESSION_NAME, CACHE_DUMP_VIDEOS_CHANNEL_ID,
     BOT_POOL_TOKENS, FOLDER_SESSIONS,
-    BOT_WAIT_MIN, BOT_WAIT_MAX, 
+    CACHE_DUMP_VIDEOS_CHANNEL_ID, JSON_FOLDER,
     BOT_BATCH_LIMIT, BOT_BATCH_COOLDOWN,
-    JSON_FOLDER,
+    BOT_WAIT_MIN, BOT_WAIT_MAX
 )
 from utils import save_image_as_webp, log_timing
+from utils.database_helpers import ensure_column
 
 # Logging
 logging.basicConfig(level=logging.ERROR)
@@ -212,14 +212,8 @@ async def monitor_loops():
 # --- DB ---
 async def check_database_schema():
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("PRAGMA table_info(videos_telegram)") as c:
-            cols = [col[1] for col in await c.fetchall()]
-            if "dump_fail" not in cols:
-                await db.execute("ALTER TABLE videos_telegram ADD COLUMN dump_fail INTEGER DEFAULT 0")
-                await db.commit()
-            if "thumb_bytes" not in cols:
-                await db.execute("ALTER TABLE videos_telegram ADD COLUMN thumb_bytes INTEGER")
-                await db.commit()
+        await ensure_column(db, "videos_telegram", "dump_fail", "INTEGER", "0")
+        await ensure_column(db, "videos_telegram", "thumb_bytes", "INTEGER")
 
 async def get_tareas_pendientes():
     log_timing("   [SQL] Consultando videos pendientes...")

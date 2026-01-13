@@ -5,6 +5,7 @@ Versión Asíncrona TOTAL (Non-blocking).
 import json
 import aiosqlite
 from config import DB_PATH
+from database.connection import get_db
 
 # Nota: Ya no importamos get_connection síncrono para estas funciones
 
@@ -105,7 +106,7 @@ async def _ensure_video_messages_table(db: aiosqlite.Connection) -> None:
 
 async def db_upsert_video(video_data: dict) -> None:
     """Inserta o actualiza un video en la tabla videos_telegram (Asíncrono)."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("""
             INSERT INTO videos_telegram (
                 id, chat_id, message_id, file_id, file_unique_id, nombre, caption,
@@ -148,7 +149,7 @@ async def db_upsert_video(video_data: dict) -> None:
 
 async def db_upsert_video_message(message_data: dict) -> None:
     """Inserta o actualiza metadatos extendidos del mensaje (Asíncrono)."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         # Aseguramos la tabla aquí también por si acaso (o mover a init_db)
         await _ensure_video_messages_table(db)
 
@@ -214,7 +215,7 @@ async def db_upsert_video_message(message_data: dict) -> None:
 
 async def db_get_video_messages(video_id: str) -> list[dict]:
     """Obtiene mensajes asociados a un video de forma ASÍNCRONA (Sin cambios mayores)."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         # Nota: La creación de tabla aquí es redundante si ya se hace arriba o en init_db,
         # pero no hace daño dejarla por seguridad.
         await _ensure_video_messages_table(db)
@@ -253,9 +254,144 @@ async def db_get_video_messages(video_id: str) -> list[dict]:
     return results
 
 
+async def db_bulk_upsert_videos(videos_data: list[dict]) -> None:
+    """Inserta o actualiza múltiples videos en una sola transacción."""
+    if not videos_data:
+        return
+    
+    async with get_db() as db:
+        await db.execute("BEGIN TRANSACTION")
+        for video_data in videos_data:
+            await db.execute("""
+                INSERT INTO videos_telegram (
+                    id, chat_id, message_id, file_id, file_unique_id, nombre, caption,
+                    tamano_bytes, fecha_mensaje, duracion, ancho, alto, es_vertical,
+                    mime_type, views, outgoing
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    file_id = excluded.file_id,
+                    nombre = excluded.nombre,
+                    caption = excluded.caption,
+                    tamano_bytes = excluded.tamano_bytes,
+                    fecha_mensaje = excluded.fecha_mensaje,
+                    duracion = excluded.duracion,
+                    ancho = excluded.ancho,
+                    alto = excluded.alto,
+                    es_vertical = excluded.es_vertical,
+                    mime_type = excluded.mime_type,
+                    views = excluded.views,
+                    outgoing = excluded.outgoing
+            """, (
+                video_data.get("file_unique_id"),
+                video_data.get("chat_id"),
+                video_data.get("message_id"),
+                video_data.get("file_id"),
+                video_data.get("file_unique_id"),
+                video_data.get("nombre"),
+                video_data.get("caption"),
+                video_data.get("tamano_bytes"),
+                video_data.get("fecha_mensaje"),
+                video_data.get("duracion", 0),
+                video_data.get("ancho", 0),
+                video_data.get("alto", 0),
+                1 if video_data.get("alto", 0) > video_data.get("ancho", 0) else 0,
+                video_data.get("mime_type"),
+                video_data.get("views", 0),
+                1 if video_data.get("outgoing") else 0,
+            ))
+        await db.execute("COMMIT")
+
+
+async def db_bulk_upsert_video_messages(messages_data: list[dict]) -> None:
+    """Inserta o actualiza múltiples mensajes en una sola transacción."""
+    if not messages_data:
+        return
+    
+    async with get_db() as db:
+        await _ensure_video_messages_table(db)
+        
+        for message_data in messages_data:
+            from_user = message_data.get("from_user") or {}
+            if not isinstance(from_user, dict):
+                from_user = {
+                    "id": getattr(from_user, "id", None),
+                    "username": getattr(from_user, "username", None),
+                    "is_bot": getattr(from_user, "is_bot", False),
+                }
+
+            forward_from_chat = message_data.get("forward_from_chat") or {}
+            if not isinstance(forward_from_chat, dict):
+                forward_from_chat = {
+                    "id": getattr(forward_from_chat, "id", None),
+                    "title": getattr(forward_from_chat, "title", None),
+                }
+
+            await db.execute("""
+                INSERT INTO video_messages (
+                    video_id, chat_id, message_id, date, from_user_id, from_username, from_is_bot,
+                    media_type, views, forwards, outgoing, reply_to_message_id,
+                    forward_from_chat_id, forward_from_chat_title, forward_from_message_id,
+                    forward_date, caption
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id, message_id) DO UPDATE SET
+                    video_id = excluded.video_id,
+                    date = excluded.date,
+                    from_user_id = excluded.from_user_id,
+                    from_username = excluded.from_username,
+                    from_is_bot = excluded.from_is_bot,
+                    media_type = excluded.media_type,
+                    views = excluded.views,
+                    forwards = excluded.forwards,
+                    outgoing = excluded.outgoing,
+                    reply_to_message_id = excluded.reply_to_message_id,
+                    forward_from_chat_id = excluded.forward_from_chat_id,
+                    forward_from_chat_title = excluded.forward_from_chat_title,
+                    forward_from_message_id = excluded.forward_from_message_id,
+                    forward_date = excluded.forward_date,
+                    caption = excluded.caption
+            """, (
+                message_data.get("video_id"),
+                message_data.get("chat_id"),
+                message_data.get("message_id"),
+                message_data.get("date"),
+                from_user.get("id"),
+                from_user.get("username"),
+                1 if from_user.get("is_bot") else 0 if from_user else None,
+                message_data.get("media"),
+                message_data.get("views"),
+                message_data.get("forwards"),
+                1 if message_data.get("outgoing") else 0,
+                message_data.get("reply_to_message_id"),
+                forward_from_chat.get("id"),
+                forward_from_chat.get("title"),
+                message_data.get("forward_from_message_id"),
+                message_data.get("forward_date"),
+                message_data.get("caption"),
+            ))
+        await db.commit()
+
+
+async def db_bulk_add_video_file_ids(file_ids_data: list[tuple]) -> None:
+    """Registra múltiples file_ids en una sola transacción.
+    file_ids_data: lista de tuplas (video_id, file_id, file_unique_id, origen)
+    """
+    if not file_ids_data:
+        return
+    
+    async with get_db() as db:
+        for video_id, file_id, file_unique_id, origen in file_ids_data:
+            await db.execute("""
+                INSERT INTO video_file_ids (video_id, file_id, file_unique_id, origen)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(video_id, file_id) DO UPDATE SET
+                    fecha_detectado = CURRENT_TIMESTAMP
+            """, (video_id, file_id, file_unique_id, origen))
+        await db.commit()
+
+
 async def db_add_video_file_id(video_id: str, file_id: str, file_unique_id: str, origen: str = "scan") -> None:
     """Registra un file_id detectado para un video (Asíncrono)."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("""
             INSERT INTO video_file_ids (video_id, file_id, file_unique_id, origen)
             VALUES (?, ?, ?, ?)
@@ -265,7 +401,7 @@ async def db_add_video_file_id(video_id: str, file_id: str, file_unique_id: str,
         await db.commit()
 
 async def db_count_videos_by_chat(chat_id: int) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT COUNT(*) FROM videos_telegram WHERE chat_id = ?",
             (chat_id,),

@@ -70,10 +70,11 @@ async def ver_carpeta(request: Request, folder_id: int, name: str = "Carpeta"):
     Nota: Los datos reales se cargan vía WebSocket para mejor rendimiento.
     Esta función solo devuelve el template HTML inicial.
     """
+    log_timing(f" Iniciando endpoint /folder/{folder_id}..")
     sort, direction = _parse_sort_params(request)
 
     # No cargamos datos aquí; los items se llenan vía WebSocket
-    return templates.TemplateResponse(MAIN_TEMPLATE, {
+    result = templates.TemplateResponse(MAIN_TEMPLATE, {
         "request": request,
         "items": [],
         "view_type": "folder",
@@ -85,11 +86,14 @@ async def ver_carpeta(request: Request, folder_id: int, name: str = "Carpeta"):
         "current_channel_name": None,
         "parent_link": "/",
     })
+    log_timing(f"Endpoint /folder/{folder_id} terminado")
+    return result
 
 
 @router.websocket("/ws/folder/{folder_id}")
 async def folder_ws(websocket: WebSocket, folder_id: int):
     """WebSocket para notificaciones de refresco de carpeta."""
+    log_timing(f"WebSocket conectado para carpeta {folder_id}")
     limite_videos_default = 999888777
     await ws_manager.connect(folder_id, websocket)
     # Enviar datos iniciales en segundo plano para no bloquear la conexión
@@ -123,9 +127,11 @@ async def folder_ws(websocket: WebSocket, folder_id: int):
                 "sort": sort,
                 "direction": direction,
             })
+            log_timing(f"Datos iniciales enviados: {len(items)} items")
         except Exception as e:
             try:
                 await websocket.send_json({"type": "error", "message": str(e)})
+                log_timing(f"Error en WebSocket: {e}")
             except Exception:
                 pass
 
@@ -135,13 +141,16 @@ async def folder_ws(websocket: WebSocket, folder_id: int):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        log_timing(f"WebSocket desconectado para carpeta {folder_id}")
         ws_manager.disconnect(folder_id, websocket)
 
 
 @router.get("/api/folder/{folder_id}")
 async def api_folder(folder_id: int):
     """API JSON para obtener items de una carpeta."""
+    log_timing(f" Iniciando endpoint /api/folder/{folder_id}..")
     items = await get_folder_items_from_db(folder_id)
+    log_timing(f"Endpoint /api/folder/{folder_id} terminado")
     return JSONResponse(items)
 
 

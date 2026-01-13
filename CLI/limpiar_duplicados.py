@@ -36,23 +36,14 @@ except Exception:
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
-from config import DB_PATH, THUMB_FOLDER
+from config import DB_PATH, THUMB_FOLDER  # noqa: E402
 from routes.duplicates import _normalize_name
+from utils.database_helpers import ensure_column  # noqa: E402
 
 _SIM_MODEL = None
 _SIM_TRANSFORM = None
 
 
-async def _ensure_thumb_bytes_column(db: aiosqlite.Connection) -> None:
-    async with db.execute("PRAGMA table_info(videos_telegram)") as cursor:
-        cols = [row[1] async for row in cursor]
-    if "thumb_bytes" in cols:
-        return
-    try:
-        await db.execute("ALTER TABLE videos_telegram ADD COLUMN thumb_bytes INTEGER;")
-        await db.commit()
-    except Exception:
-        pass
 
 
 def _thumb_info(chat_id: int, video_id: str, mode: str) -> Dict[str, Any]:

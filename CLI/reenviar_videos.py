@@ -20,6 +20,8 @@ from config import (
 )
 from services.telegram_client import get_client
 from utils import save_image_as_webp, log_timing
+from utils.database_helpers import ensure_column
+
 # --- CONFIGURACIÓN ---
 LIMITE =1000  # Cantidad de videos a procesar en esta vuelta
 BATCH =   30  # Tamaño del paquete de reenvío (No subir de 30)
@@ -28,12 +30,7 @@ MAX_CHATS_CONCURRENTES = 3  # cuántos chats se procesan en paralelo
 
 async def check_database_schema():
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("PRAGMA table_info(videos_telegram)") as cursor:
-            columns = await cursor.fetchall()
-            col_names = [col[1] for col in columns]
-            if "dump_fail" not in col_names:
-                await db.execute("ALTER TABLE videos_telegram ADD COLUMN dump_fail INTEGER DEFAULT 0")
-                await db.commit()
+        await ensure_column(db, "videos_telegram", "dump_fail", "INTEGER", "0")
 
 async def marcar_fallidos(video_ids, razon):
     if not video_ids:

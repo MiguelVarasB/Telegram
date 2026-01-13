@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import sqlite3
 import time
 from pathlib import Path
@@ -8,7 +9,10 @@ from typing import Iterable
 import imagehash
 from PIL import Image
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from config import DB_PATH, THUMB_FOLDER
+from utils.database_helpers import ensure_column
 
 
 THUMB_EXT = ".webp"
@@ -22,12 +26,6 @@ def configure_connection(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA busy_timeout = 30000")  # 30s de espera por lock
 
 
-def ensure_thumb_phash_column(conn: sqlite3.Connection) -> None:
-    cur = conn.execute("PRAGMA table_info(videos_telegram)")
-    cols = [row[1] for row in cur.fetchall()]
-    if "thumb_phash" not in cols:
-        conn.execute("ALTER TABLE videos_telegram ADD COLUMN thumb_phash TEXT;")
-        conn.commit()
 
 
 def iter_pending_rows(conn: sqlite3.Connection, limit: int | None, offset: int) -> Iterable[tuple[int, str]]:
@@ -98,7 +96,12 @@ def run(limit: int | None, offset: int, batch_size: int) -> None:
 
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
         configure_connection(conn)
-        ensure_thumb_phash_column(conn)
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(videos_telegram)")
+        cols = [row[1] for row in cur.fetchall()]
+        if "thumb_phash" not in cols:
+            conn.execute("ALTER TABLE videos_telegram ADD COLUMN thumb_phash TEXT;")
+            conn.commit()
 
         pending_iter = iter_pending_rows(conn, limit=limit, offset=offset)
         total_ok = total_fail = total_seen = 0

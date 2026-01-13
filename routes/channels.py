@@ -13,13 +13,14 @@ from fastapi.responses import JSONResponse
 from pyrogram import enums
 
 from config import TEMPLATES_DIR, JSON_FOLDER, MAIN_TEMPLATE, DB_PATH, SMART_CACHE_ENABLED
+from database.connection import get_db
 from services import get_client, prefetch_channel_videos_to_ram, background_thumb_downloader
 from database import (
     db_upsert_video, db_add_video_file_id, 
     db_get_chat, db_get_chat_folders, db_get_chat_scan_meta,
     db_upsert_video_message, db_count_videos_by_chat, db_upsert_chat_video_count
 )
-from utils import convertir_tamano, formatear_miles, ws_manager
+from utils import convertir_tamano, formatear_miles, ws_manager, log_timing
 
 router = APIRouter()
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -64,6 +65,7 @@ async def _get_telegram_meta(chat_id: int) -> dict:
 @router.get("/api/channel/{chat_id}/info")
 async def api_channel_info(chat_id: int):
     """Devuelve metadatos básicos y conteo de videos del canal/chat."""
+    log_timing(f" Iniciando endpoint /api/channel/{chat_id}/info..")
     chat = await db_get_chat(chat_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat no encontrado")
@@ -78,7 +80,7 @@ async def api_channel_info(chat_id: int):
     username = chat.get("username") or telegram_meta.get("username")
     chat_type = chat.get("type") or telegram_meta.get("type")
 
-    return {
+    result = {
         "chat_id": chat_id,
         "name": name,
         "type": chat_type,
@@ -97,6 +99,8 @@ async def api_channel_info(chat_id: int):
         "is_restricted": telegram_meta.get("is_restricted"),
         "restriction_reason": telegram_meta.get("restriction_reason"),
     }
+    log_timing(f"Endpoint /api/channel/{chat_id}/info terminado")
+    return result
 
 @router.post("/api/channel/{chat_id}/scan")
 async def api_channel_scan(chat_id: int, background_tasks: BackgroundTasks):
@@ -115,6 +119,7 @@ async def api_channel_videos(
     """
     Devuelve videos ya indexados de un canal/chat (solo lectura, sin disparar indexación).
     """
+    log_timing(f" Iniciando endpoint /api/channel/{chat_id}/videos..")
     videos_locales = await get_local_videos(chat_id)
 
     valid_sorts = {
@@ -150,7 +155,7 @@ async def api_channel_videos(
         "sort": sort,
         "direction": direction,
     }
-
+    log_timing(f"Endpoint /api/channel/{chat_id}/videos terminado")
     return {"items": items_paged, "pagination": pagination}
 
 def _build_page_links(page: int, total_pages: int):
@@ -228,7 +233,7 @@ async def get_local_videos(chat_id: int):
     """Obtiene rápidamente los videos ya guardados en la BD para mostrar algo al usuario."""
     videos = []
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             db.row_factory = aiosqlite.Row
             # Seleccionamos campos compatibles con la vista
             cursor = await db.execute("""
@@ -406,6 +411,7 @@ async def ver_canal(
     direction: str = Query("desc"),
 ):
     """Vista de canal no bloqueante."""
+    log_timing(f" Iniciando endpoint /channel/{chat_id}..")
     
     # 1. Recuperar datos locales (RÁPIDO)
     # Esto asegura que el usuario vea algo inmediatamente si ya entró antes.
@@ -496,7 +502,7 @@ async def ver_canal(
     }
 
     # 5. Responder inmediatamente
-    return templates.TemplateResponse(MAIN_TEMPLATE, {
+    result = templates.TemplateResponse(MAIN_TEMPLATE, {
         "request": request,
         "items": items_paged, # Mostramos lo que tenemos ya cacheado paginado
 
@@ -509,3 +515,5 @@ async def ver_canal(
         "is_scanning": True, # Flag opcional para mostrar un spinner en el frontend
         "pagination": pagination,
     })
+    log_timing(f"Endpoint /channel/{chat_id} terminado")
+    return result

@@ -14,7 +14,7 @@ from config import (
     SESSION_NAME_SERVER,
     FOLDER_SESSIONS,
 )
-
+from utils import log_timing
 # Cliente en modo pasivo (no_updates=True) para evitar errores de PeerInvalid
 # Permitimos múltiples instancias (p. ej., un clon para CLI) cacheadas por ruta.
 _clients: dict[str, Client] = {}
@@ -83,7 +83,7 @@ async def start_client(use_server_session: bool = False):
     """
     client = get_client(use_server_session=use_server_session)
     await client.start()
-    print("🚀 Cliente de Telegram iniciado")
+    log_timing("🚀 Cliente de Telegram iniciado")
 
 
 async def stop_client():
@@ -91,7 +91,7 @@ async def stop_client():
     client = get_client()
     if client.is_connected:
         await client.stop()
-    print("🛑 Cliente de Telegram detenido")
+    log_timing("🛑 Cliente de Telegram detenido")
 
 
 async def reconnect_client():
@@ -102,22 +102,22 @@ async def reconnect_client():
         try:
             # Intentar detener si está conectado
             if client.is_connected:
-                print("🔄 Desconectando cliente existente...")
+                log_timing("🔄 Desconectando cliente existente...")
                 await client.stop()
         except Exception as e:
-            print(f"⚠️ Error al detener cliente: {e}")
+            log_timing(f"⚠️ Error al detener cliente: {e}")
         
         # Reconectar
         try:
-            print("🔄 Reconectando cliente de Telegram...")
+            log_timing("🔄 Reconectando cliente de Telegram...")
             await client.start()
-            print("✅ Cliente reconectado exitosamente")
+            log_timing("✅ Cliente reconectado exitosamente")
             return True
         except (AuthKeyUnregistered, SessionRevoked) as e:
-            print(f"❌ Error de sesión: {e}. Necesitas volver a autenticarte.")
+            log_timing(f"❌ Error de sesión: {e}. Necesitas volver a autenticarte.")
             return False
         except Exception as e:
-            print(f"❌ Error al reconectar: {e}")
+            log_timing(f"❌ Error al reconectar: {e}")
             return False
 
 
@@ -125,7 +125,7 @@ async def ensure_connected():
     """Verifica que el cliente esté conectado, reconecta si es necesario."""
     client = get_client()
     if not client.is_connected:
-        print("⚠️ Cliente desconectado, intentando reconectar...")
+        log_timing("⚠️ Cliente desconectado, intentando reconectar...")
         return await reconnect_client()
     return True
 
@@ -151,7 +151,7 @@ async def with_reconnect(coro_func, *args, max_retries: int = 3, **kwargs):
         except OSError as e:
             # Errores de socket (WinError 10053, 10054, etc.)
             last_error = e
-            print(f"⚠️ Error de conexión (intento {attempt + 1}/{max_retries}): {e}")
+            log_timing(f"⚠️ Error de conexión (intento {attempt + 1}/{max_retries}): {e}")
             
             if attempt < max_retries - 1:
                 await asyncio.sleep(1)  # Esperar antes de reintentar
@@ -168,12 +168,12 @@ async def with_reconnect(coro_func, *args, max_retries: int = 3, **kwargs):
 async def warmup_cache(limit: int = 100):
     """Descarga diálogos para 'calentar' la caché y obtener llaves de acceso."""
     client = get_client()
-    print("⏳ Sincronizando lista de chats...")
+    log_timing("⏳ Sincronizando lista de chats...")
     try:
         count = 0
         async for dialog in client.get_dialogs(limit=limit):
             count += 1
-        print(f"✅ Sincronización completada ({count} chats)")
+        log_timing(f"✅ Sincronización completada ({count} chats)")
     except Exception as e:
-        print(f"⚠️ Aviso: Sincronización parcial ({e})")
+        log_timing(f"⚠️ Aviso: Sincronización parcial ({e})")
 

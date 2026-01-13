@@ -20,8 +20,10 @@ router = APIRouter()
 
 @router.get("/api/video/{video_id}/messages")
 async def api_video_messages(video_id: str):
+    log_timing(f" Iniciando endpoint /api/video/{video_id}/messages..")
     # DB call async
     messages = await db_get_video_messages(video_id)
+    log_timing(f"Endpoint /api/video/{video_id}/messages terminado")
     return {"video_id": video_id, "messages": messages}
 
 
@@ -246,7 +248,7 @@ async def get_photo(
 
 @router.get("/api/stats")
 async def api_stats(limit: int = 10):
-    log_timing("api_stats")
+    log_timing(f" Iniciando endpoint /api/stats..")
     EXCLUDE_CHAT_ID = -1003512635282
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("PRAGMA table_info(videos_telegram)") as cursor:
@@ -463,7 +465,7 @@ async def api_stats(limit: int = 10):
                 "telegram_link": build_link(chat_id),
             }
         )
-    log_timing("Entrega datos")
+    log_timing(f"Endpoint /api/stats terminado")
     return {
         "total_videos": total_videos,
         "unique_videos": unique_videos,

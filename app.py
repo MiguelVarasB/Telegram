@@ -15,7 +15,7 @@ from config import (
 )
 from database import init_db
 from services import start_client, stop_client, warmup_cache
-from utils import init_mqtt_manager, get_mqtt_manager
+from utils import init_mqtt_manager, get_mqtt_manager,log_timing
 from routes import (
     home_router,
     folders_router,
@@ -43,7 +43,7 @@ for noisy_logger in (
 async def lifespan(app: FastAPI):
     """Gestiona el ciclo de vida de la aplicación."""
     # Startup
-    print(" Iniciando MegaTelegram Local...")
+    log_timing(" Iniciando MegaTelegram Local...")
     ensure_directories()
     
     # --- INICIALIZACIÓN DE BASE DE DATOS ASÍNCRONA ---
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     
     # --- INICIALIZACIÓN DE MQTT ---
     if MQTT_ENABLED:
-        print(f" Conectando al broker MQTT en {MQTT_BROKER}:{MQTT_PORT}...")
+        log_timing(f" Conectando al broker MQTT en {MQTT_BROKER}:{MQTT_PORT}...")
         mqtt_mgr = init_mqtt_manager(
             broker=MQTT_BROKER,
             port=MQTT_PORT,
@@ -62,11 +62,11 @@ async def lifespan(app: FastAPI):
         )
         connected = await mqtt_mgr.connect()
         if connected:
-            print(" MQTT Manager inicializado correctamente")
+            log_timing(" MQTT Manager inicializado correctamente")
         else:
-            print(" MQTT Manager no pudo conectarse, continuando sin notificaciones MQTT")
+            log_timing(" MQTT Manager no pudo conectarse, continuando sin notificaciones MQTT")
     else:
-        print(" MQTT deshabilitado en configuración")
+        log_timing(" MQTT deshabilitado en configuración")
     
     # Usamos una sesión de Telegram separada para el servidor para evitar locks
     await start_client(use_server_session=True)
@@ -109,4 +109,5 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 if __name__ == "__main__":
+    log_timing(" Iniciando servidor FastAPI...")
     uvicorn.run(app, host=HOST, port=PORT, log_level=UVICORN_LOG_LEVEL.lower())

@@ -9,11 +9,13 @@ from unigram_cacheo.common import CARPETAS, DB_LOCAL, preparar_base_local
 HAS_CACHE_VAL = 5
 
 
-def ensure_has_cache_column(cur_main: sqlite3.Cursor) -> None:
-    cur_main.execute("PRAGMA table_info(videos_telegram)")
-    cols = {row[1] for row in cur_main.fetchall()}
+def ensure_has_cache_column(conn: sqlite3.Connection) -> None:
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(videos_telegram)")
+    cols = {row[1] for row in cur.fetchall()}
     if "has_cache" not in cols:
-        cur_main.execute("ALTER TABLE videos_telegram ADD COLUMN has_cache INTEGER")
+        conn.execute("ALTER TABLE videos_telegram ADD COLUMN has_cache INTEGER")
+        conn.commit()
 
 
 def run():
@@ -22,9 +24,9 @@ def run():
     conn_main = sqlite3.connect(DB_PATH)
 
     try:
+        ensure_has_cache_column(conn_main)
+        
         cur_main = conn_main.cursor()
-        ensure_has_cache_column(cur_main)
-
         cur_local = conn_local.cursor()
         filas = cur_local.execute(
             "SELECT archivo, unique_id FROM cacheo WHERE tipo = 'video' AND unique_id IS NOT NULL"

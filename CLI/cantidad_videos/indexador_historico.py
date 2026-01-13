@@ -18,7 +18,7 @@ from database.videos import (  # noqa: E402
     db_upsert_video_message,
 )
 from database.chats import db_get_chat  # noqa: E402
-
+from utils import log_timing
 Excluir=[
 CACHE_DUMP_VIDEOS_CHANNEL_ID,
 -1002670762200 ,
@@ -42,27 +42,38 @@ async def _ensure_last_hist_scan_column(db: aiosqlite.Connection) -> None:
         await db.commit()
 
 
-async def obtener_chats_con_historial():
+async def obtener_chats_con_historial() -> list[int]:
     """
-    Solo nos interesan chats que ya tengan al menos 1 video,
-    para poder buscar 'hacia atrás' desde ese video.
+    Devuelve lista de chat_id que:
+      - Tienen videos indexados (indexados > 0)
+      - Están activos
+      - No son propios
+      - Tienen faltantes (videos_count - duplicados - indexados > 0)
     """
     async with aiosqlite.connect(DB_PATH) as db:
-        await _ensure_last_hist_scan_column(db)
         async with db.execute(
             """
             SELECT cvc.chat_id
             FROM chat_video_counts cvc
             JOIN chats c ON cvc.chat_id = c.chat_id
-            WHERE cvc.videos_count > 0
+            WHERE cvc.indexados > 0
               AND c.activo = 1
               AND COALESCE(c.is_owner, 0) = 0
-               AND (cvc.videos_count - COALESCE(cvc.duplicados, 0) - COALESCE(cvc.indexados, 0)) > 0
-        ORDER BY (cvc.videos_count - COALESCE(cvc.duplicados, 0) - COALESCE(cvc.indexados, 0)) DESC
+              AND (cvc.videos_count - COALESCE(cvc.duplicados, 0) - COALESCE(cvc.indexados, 0)) > 0
+            ORDER BY (cvc.videos_count - COALESCE(cvc.duplicados, 0) - COALESCE(cvc.indexados, 0)) DESC
             """
-        ) as cursor:
-            rows = await cursor.fetchall()
-    return [row[0] for row in rows]
+        ) as cur:
+            rows = await cur.fetchall()
+            chats = [row[0] for row in rows]
+            
+            # Si no hay chats, verificar si es porque no hay datos
+            if not chats:
+                async with db.execute("SELECT COUNT(*) FROM chat_video_counts WHERE indexados > 0") as cur2:
+                    row = await cur2.fetchone()
+                    if row[0] == 0:
+                        log_timing("⚠️ No hay chats con videos indexados. Ejecuta primero el Paso 4 (sincronizador).")
+            
+            return chats
 
 
 async def obtener_nombre_chat(chat_id: int, client) -> str:
@@ -208,7 +219,7 @@ async def procesar_video_historico(message):
         }
         await db_upsert_video_message(message_data)
     except Exception as e:
-        print(f"[ERR] Error guardando ID {message.id}: {e}")
+        log_timing(f"[ERR] Error guardando ID {message.id}: {e}")
         return False
 
     return es_nuevo
@@ -218,7 +229,7 @@ async def procesar_video_historico(message):
 # ---------------------------------------------------------
 async def escanear_historia_antigua(client, chat_id: int):
     if chat_id in Excluir:
-        print(f"Chat {chat_id}: excluido, se salta.")
+        log_timing(f"Chat {chat_id}: excluido, se salta.")
         return
 
     chat_nombre = await obtener_nombre_chat(chat_id, client)
@@ -227,17 +238,17 @@ async def escanear_historia_antigua(client, chat_id: int):
     id_mas_antiguo = await obtener_id_mas_antiguo(chat_id)
     
     if not id_mas_antiguo:
-        print(f"Chat {chat_id}: No hay datos previos. Usa el sincronizador normal primero.")
+        log_timing(f"Chat {chat_id}: No hay datos previos. Usa el sincronizador normal primero.")
         return
 
     indexados, total_unicos, total_videos, duplicados, faltantes = await obtener_stats_chat(chat_id)
 
-    print(
+    log_timing(
         f"\n📺 Canal {chat_id} ({chat_nombre}): {indexados} indexados / "
         f"{total_unicos} únicos ({total_videos} totales, {duplicados} dupes). "
         f"Faltan {faltantes}."
     )
-    print(f"--- Punto de partida (hacia atrás): ID {id_mas_antiguo} ---")
+    log_timing(f"--- Punto de partida (hacia atrás): ID {id_mas_antiguo} ---")
 
     count_nuevos = 0
     count_total = 0
@@ -260,7 +271,7 @@ async def escanear_historia_antigua(client, chat_id: int):
                 ultimo_id_batch = message.id  # Guardar el último ID del batch
                 count_total += 1
                 if count_total >= LIMITE_MENSAJES:
-                    print(f"[STOP] Límite de {LIMITE_MENSAJES} mensajes alcanzado en {chat_id}.")
+                    log_timing(f"[STOP] Límite de {LIMITE_MENSAJES} mensajes alcanzado en {chat_id}.")
                     break
 
                 if not message.video:
@@ -270,24 +281,24 @@ async def escanear_historia_antigua(client, chat_id: int):
                 if es_nuevo:
                     count_nuevos += 1
                     sin_nuevos_consecutivos = 0
-                    print(f"[HISTORIA] msg_id={message.id} | chat_id={chat_id} | {message.video.file_name or 'Sin Nombre'}")
+                    log_timing(f"[HISTORIA] msg_id={message.id} | chat_id={chat_id} | {message.video.file_name or 'Sin Nombre'}")
                 else:
                     sin_nuevos_consecutivos += 1
-                    print(f"[EXISTE] msg_id={message.id} | chat_id={chat_id} | {message.video.file_name or 'Sin Nombre'} (Video ya conocido)")
+                    log_timing(f"[EXISTE] msg_id={message.id} | chat_id={chat_id} | {message.video.file_name or 'Sin Nombre'} (Video ya conocido)")
 
                 if sin_nuevos_consecutivos >= LIMITE_SIN_NUEVOS:
-                    print(f"[STOP] {LIMITE_SIN_NUEVOS} sin nuevos seguidos en {chat_id}.")
+                    log_timing(f"[STOP] {LIMITE_SIN_NUEVOS} sin nuevos seguidos en {chat_id}.")
                     break
             
             # Actualizar offset_id solo después de procesar todo el batch
             if ultimo_id_batch is not None:
                 offset_id = ultimo_id_batch
         except FloodWait as fw:
-            print(f"[FLOODWAIT] {fw.value}s en chat {chat_id}. Esperando...")
+            log_timing(f"[FLOODWAIT] {fw.value}s en chat {chat_id}. Esperando...")
             await asyncio.sleep(fw.value)
             continue
         except Exception as e:
-            print(f"[ERR] get_chat_history en {chat_id}: {e}")
+            log_timing(f"[ERR] get_chat_history en {chat_id}: {e}")
             break
 
         if not got_any:
@@ -297,9 +308,9 @@ async def escanear_historia_antigua(client, chat_id: int):
 
     # Paso 3: Aviso final (sin tocar counters; se calculan en otra etapa)
     if count_nuevos > 0:
-        print(f"--- Fin Historia {chat_id} ({chat_nombre}). +{count_nuevos} videos antiguos recuperados. ---")
+        log_timing(f"--- Fin Historia {chat_id} ({chat_nombre}). +{count_nuevos} videos antiguos recuperados. ---")
     else:
-        print(f"--- Fin Historia {chat_id} ({chat_nombre}). No se encontraron más videos antiguos. ---")
+        log_timing(f"--- Fin Historia {chat_id} ({chat_nombre}). No se encontraron más videos antiguos. ---")
 
     # Marcar última revisión histórica
     async with aiosqlite.connect(DB_PATH) as db:
@@ -317,13 +328,17 @@ async def main():
 
     try:
         chats_a_revisar = await obtener_chats_con_historial()
-        print(f"Chats con historial para expandir hacia atrás: {len(chats_a_revisar)}")
+        log_timing(f"Chats con historial para expandir hacia atrás: {len(chats_a_revisar)}")
+        
+        if not chats_a_revisar:
+            log_timing("ℹ️ No hay chats para procesar. El indexador histórico requiere que ya existan videos indexados.")
+            return
 
         for chat_id in chats_a_revisar:
             try:
                 await escanear_historia_antigua(client, chat_id)
             except Exception as e:
-                print(f"Error procesando historia de chat {chat_id}: {e}")
+                log_timing(f"Error procesando historia de chat {chat_id}: {e}")
                 # Espera breve para no saturar si hay errores masivos
                 await asyncio.sleep(2) 
 

@@ -20,29 +20,11 @@
 
     // --- Event Listeners Globales ---
     // Conecta botones, toggles y delegación de clicks a behaviors ya definidos.
+    // Nota: Los manejadores de eventos de los modales se han movido a sus respectivos archivos:
+    // - modal_video.js
+    // - modal_stats.js
+    // - modal_download.js
     function bindGlobalEvents() {
-        if (dom.modalOverlay) {
-            dom.modalOverlay.addEventListener('click', function (ev) {
-                if (ev.target === dom.modalOverlay) behaviors.closeVideoModal?.();
-            });
-        }
-        if (dom.modalClose) dom.modalClose.addEventListener('click', behaviors.closeVideoModal);
-
-        if (dom.statsButton) dom.statsButton.addEventListener('click', behaviors.openStatsModal);
-        if (dom.statsOverlay) {
-            dom.statsOverlay.addEventListener('click', function (ev) {
-                if (ev.target === dom.statsOverlay) behaviors.closeStatsModal?.();
-            });
-        }
-        if (dom.statsClose) dom.statsClose.addEventListener('click', behaviors.closeStatsModal);
-
-        if (dom.downloadsButton) dom.downloadsButton.addEventListener('click', behaviors.openDownloadsModal);
-        if (dom.downloadsOverlay) {
-            dom.downloadsOverlay.addEventListener('click', function (ev) {
-                if (ev.target === dom.downloadsOverlay) behaviors.closeDownloadsModal?.();
-            });
-        }
-        if (dom.downloadsClose) dom.downloadsClose.addEventListener('click', behaviors.closeDownloadsModal);
 
         if (dom.hideVideoButton) {
             dom.hideVideoButton.addEventListener('click', function () {
@@ -64,21 +46,7 @@
             });
         }
 
-        // Tecla Escape
-        document.addEventListener('keydown', function (event) {
-            if (event.key !== 'Escape') return;
-            if (dom.statsOverlay && dom.statsOverlay.classList.contains('is-open')) {
-                behaviors.closeStatsModal?.();
-                return;
-            }
-            if (dom.downloadsOverlay && dom.downloadsOverlay.classList.contains('is-open')) {
-                behaviors.closeDownloadsModal?.();
-                return;
-            }
-            if (dom.modalOverlay && dom.modalOverlay.classList.contains('is-open')) {
-                behaviors.closeVideoModal?.();
-            }
-        });
+        // Tecla Escape - Manejo movido a los respectivos archivos de modales
     }
 
     // --- Conexión de Carpeta: MQTT o WebSocket ---
@@ -96,7 +64,7 @@
                 setupFolderMQTT(folderId);
             } else {
                 console.log(`[Main] MQTT no disponible, usando WebSocket para carpeta ${folderId}`);
-                setupFolderWS();
+                setupFolderWebSocket(folderId);
             }
         } catch (e) {
             console.warn('[Main] Error en setupFolderConnection', e);
@@ -126,30 +94,35 @@
         console.log(`[Main] Suscrito a MQTT para carpeta ${folderId}`);
     }
 
-    // --- Función de recarga de carpeta (para MQTT) ---
-    function reloadFolderItems() {
-        const container = document.querySelector('.container[data-folder-id]');
-        if (!container) return;
-        
-        const folderId = container.getAttribute('data-folder-id');
-        if (!folderId) return;
-        
-        // Usar la misma lógica que setupLiveFolderUpdates
-        fetch('/api/folder/' + encodeURIComponent(folderId))
-            .then(res => {
-                if (!res.ok) throw new Error('Error recargando carpeta');
-                return res.json();
-            })
-            .then(data => {
-                if (typeof window.renderItems === 'function') {
-                    window.renderItems(data);
-                } else {
-                    console.error('renderItems no disponible');
-                }
-            })
-            .catch(e => {
-                console.error('Error recargando carpeta:', e);
-            });
+    // --- WebSocket de carpeta (fallback) ---
+    function setupFolderWebSocket(folderId) {
+        // Solo la carpeta especial -1 usa este WS de init
+        if (folderId !== '-1') return;
+
+        const loc = window.location;
+        const proto = (loc.protocol === 'https:') ? 'wss:' : 'ws:';
+        const wsUrl = proto + '//' + loc.host + '/ws/folder/' + encodeURIComponent(folderId);
+        const ws = new WebSocket(wsUrl);
+
+        ws.onmessage = function (event) {
+            try {
+                const payload = JSON.parse(event.data);
+                if (!payload || !payload.type) return;
+                handleFolderMessage(payload, folderId);
+            } catch (e) {
+                console.error('WS folder message parse error', e);
+            }
+        };
+
+        ws.onerror = function (error) {
+            console.error('WS folder error:', error);
+        };
+
+        ws.onclose = function () {
+            console.log('WS folder closed');
+        };
+
+        console.log(`[Main] WebSocket conectado para carpeta ${folderId}`);
     }
 
     // --- Manejar mensajes de carpeta (común para MQTT y WebSocket) ---
@@ -200,44 +173,15 @@
         }
     }
 
-    // --- WebSocket de carpeta: recibir init/refresh y re-renderizar items ---
-    // Escucha mensajes en tiempo real para reemplazar la grilla de la carpeta.
-    function setupFolderWS() {
-        try {
-            const container = document.querySelector('.container[data-folder-id]');
-            if (!container) return;
-            const folderId = container.getAttribute('data-folder-id');
-            if (!folderId) return;
-            // Solo la carpeta especial -1 usa este WS de init
-            if (folderId !== '-1') return;
-
-            const loc = window.location;
-            const proto = (loc.protocol === 'https:') ? 'wss:' : 'ws:';
-            const wsUrl = proto + '//' + loc.host + '/ws/folder/' + encodeURIComponent(folderId);
-            const ws = new WebSocket(wsUrl);
-
-            ws.onmessage = function (event) {
-                try {
-                    const payload = JSON.parse(event.data);
-                    handleFolderMessage(payload, folderId);
-                } catch (e) {
-                    console.error('WS folder message parse error', e);
-                }
-            };
-
-            function renderFolderItems(items) {
-                const grid = document.querySelector('.grid-view');
-                if (!grid) return;
-                if (typeof window.renderItems === 'function') {
-                    window.renderItems(items);
-                    if (window.refreshLazyChatPhotos) window.refreshLazyChatPhotos();
-                    return;
-                }
-                grid.innerHTML = '<div style="padding:12px;">' + (items.length || 0) + ' elementos recibidos (WS)</div>';
-            }
-        } catch (e) {
-            console.warn('WS folder setup error', e);
+    function renderFolderItems(items) {
+        const grid = document.querySelector('.grid-view');
+        if (!grid) return;
+        if (typeof window.renderItems === 'function') {
+            window.renderItems(items);
+            if (window.refreshLazyChatPhotos) window.refreshLazyChatPhotos();
+            return;
         }
+        grid.innerHTML = '<div style="padding:12px;">' + (items.length || 0) + ' elementos recibidos</div>';
     }
 
     // --- Sincronización de Carpeta (WebSocket) ---
@@ -488,30 +432,15 @@
             if (!res.ok) throw new Error('scan-batch failed');
             const data = await res.json();
             state.batchScan = {
-                jobId: data.job_id,
-                total: data.total || chatIds.length,
-                done: 0,
-                running: 0,
-            };
-            updateBatchButton(formatBatchLabel(), true);
-        } catch (e) {
-            console.error('Error batch scan', e);
-            updateBatchButton('Error al iniciar', true);
-            setTimeout(() => updateBatchButton('Sincronizar faltantes', false), 2000);
-        }
-    };
 
-    // --- Inicialización principal ---
-    // Aplica estados iniciales, listeners y WS al cargar la página.
-    function init() {
-        behaviors.setupHoverPreviews?.();
-        setupLiveFolderUpdates();
+// --- Exponer funciones globalmente ---
+window.reloadFolderItems = reloadFolderItems;
         behaviors.applyHiddenStateToAll?.();
         behaviors.applyDuplicateFilter?.();
         behaviors.applyWatchLaterStateToAll?.();
         behaviors.setupLazyChatPhotos?.();
         behaviors.initSearchHandlers?.();
-        setupFolderConnection(); // Usar MQTT o WebSocket según disponibilidad
+        setupFolderConnection(); // Usar la nueva función MQTT/WebSocket
         bindGlobalEvents();
 
         const btnSync = document.getElementById("btn-sync-diario");
