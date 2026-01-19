@@ -28,11 +28,11 @@ AVAILABLE_RAM_GB = psutil.virtual_memory().total / (1024**3)
 
 # Configuración base según hardware detectado
 if CPU_CORES >= 12 and AVAILABLE_RAM_GB >= 48:
-    # Hardware de alto rendimiento (como tu sistema)
-    MAX_WORKERS = min(12, CPU_CORES - 1)
+    # Hardware de alto rendimiento (Tu Xeon + 64GB)
+    MAX_WORKERS = CPU_CORES - 1  # Usa 15 núcleos
     BATCH_SIZE = 1000
-    DB_COMMIT_SIZE = 2000
-    CHUNK_SIZE = 2000
+    DB_COMMIT_SIZE = 5000        # Commits más espaciados para ganar velocidad
+    CHUNK_SIZE = 200             # Bloques más pequeños para saturar todos los núcleos
     ENABLE_AGGRESSIVE_OPTIMIZATION = True
     
 elif CPU_CORES >= 8 and AVAILABLE_RAM_GB >= 24:
