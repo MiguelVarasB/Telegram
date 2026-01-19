@@ -1,14 +1,17 @@
 """
 Módulo de servicios.
 """
+"""
+Módulo de servicios (Lógica de negocio y clientes externos).
+"""
 from .telegram_client import (
-    get_client, 
-    start_client, 
-    stop_client, 
+    start_client,
+    stop_client,
+    get_client,
     warmup_cache,
-    reconnect_client,
+    with_reconnect,  # Ahora sí existe
     ensure_connected,
-    with_reconnect,
+    reconnect_client
 )
 from .folder_sync import refresh_manual_folder_from_telegram
 from .video_streamer import TelegramVideoSender

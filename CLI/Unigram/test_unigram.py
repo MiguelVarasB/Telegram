@@ -1,118 +1,95 @@
-import os
-import io
-import struct
+import sqlite3
 import re
-import json
-from datetime import datetime
-from sqlcipher3 import dbapi2 as sqlite
-from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
+import pandas as pd
 
-# --- CONFIGURACIÓN ---
-MASTER_KEY = "f50f8b071d7eaf41c01e1a0309fdc01010c1247843a482c62577d325ab968f63"
-DB_UNIGRAM = r"C:\Users\TheMiguel\AppData\Local\Packages\38833FF26BA1D.UnigramPreview_g9c9v27vpyspw\LocalState\0\db.sqlite"
-CANAL_ID = -1001147088141 # Canal de Índices
+# CONFIGURACIÓN
+DB_PATH = "unigram_abierta.sqlite"
+OUTPUT_FILE = "chats_extraidos.txt"
 
-console = Console()
-
-class ProcesadorIndices:
-    @staticmethod
-    def limpiar_basura(texto):
-        """Limpia restos binarios y avisos de censura."""
-        aviso = "This message couldn't be displayed on your device because it contains pornographic materials."
-        texto = texto.replace(aviso, "")
-        # Quitamos bytes de control al inicio del bloque
-        return re.sub(r'^[^\w@#🤤🔞🛰👥🔥]+', '', texto).strip()
-
-    @staticmethod
-    def extraer_pares(blob: bytes):
-        """Divide el BLOB en bloques de Texto + URL."""
-        content = blob.decode('utf-8', errors='ignore')
-        
-        # 1. Buscamos la fecha real
-        fecha = "N/A"
-        try:
-            ts = struct.unpack('<I', blob[28:32])[0]
-            fecha = datetime.fromtimestamp(ts).strftime('%d.%m.%y %H:%M')
-        except: pass
-
-        # 2. Partimos el mensaje usando las URLs como divisores
-        # Esto nos da: [Texto previo, URL 1, Texto intermedio, URL 2...]
-        partes = re.split(r'(https?://[^\s<>"]+|t\.me/[^\s<>"]+)', content)
-        
-        pares = []
-        # El primer elemento (índice 0) suele ser el título del mensaje global
-        titulo_mensaje = ProcesadorIndices.limpiar_basura(partes[0]) if partes else ""
-
-        # Recorremos de 2 en 2 para captar (Texto descriptivo + URL)
-        for i in range(1, len(partes) - 1, 2):
-            url = partes[i]
-            # El texto descriptivo está en el bloque anterior, o es el título si es el primero
-            descripcion = ProcesadorIndices.limpiar_basura(partes[i-1])
-            
-            # Limpiamos la URL de basura binaria al final
-            url_limpia = re.sub(r'[^\w/.\-?=&#%]+$', '', url)
-            
-            pares.append({"texto": descripcion, "url": url_limpia})
-
-        return {
-            "fecha": fecha,
-            "titulo_global": titulo_mensaje,
-            "elementos": pares,
-            "censurado": b"pornographic" in blob
-        }
-
-def renderizar_unigram_index(id_msg, datos):
-    # Cabecera del mensaje principal
-    console.print(f"\n[bold white on blue]  ID: {id_msg} | 📅 {datos['fecha']}  [/]")
+def extraer_texto_limpio(blob_data):
+    """
+    Intenta decodificar bytes a UTF-8 y filtra caracteres no imprimibles.
+    Funciona como el comando 'strings' de Linux pero para Python.
+    """
+    if not blob_data:
+        return ""
     
-    if datos['censurado']:
-        console.print("[italic red]🚫 Contenido bloqueado por Telegram (Filtro Adultos)[/]")
-
-    # Título principal del post (ej: INDICE DE GRUPOS)
-    if datos['titulo_global']:
-        console.print(f"\n[bold yellow]{datos['titulo_global']}[/]")
-
-    # Listado emparejado (Igual que en image_5f91a2.png)
-    for item in datos['elementos']:
-        # Solo imprimimos si el texto no es demasiado corto (basura)
-        if len(item['texto']) > 5:
-            cuerpo = Text()
-            # Dividimos el texto para poner la primera línea en negrita (Título del grupo)
-            lineas = item['texto'].split('\n')
-            cuerpo.append(f"• {lineas[0]}\n", style="bold white")
-            
-            # El resto es la descripción
-            if len(lineas) > 1:
-                desc = " ".join(lineas[1:]).strip()
-                cuerpo.append(f"  {desc}\n", style="dim white")
-            
-            # El Link justo debajo del texto
-            cuerpo.append(f"  {item['url']}", style="link blue underline")
-            
-            console.print(cuerpo)
-            console.print(" ") # Espacio entre grupos
-
-def ejecutar():
     try:
-        conn = sqlite.connect(DB_UNIGRAM)
-        cursor = conn.cursor()
-        cursor.execute(f"PRAGMA key = \"x'{MASTER_KEY}'\";")
-        cursor.execute("PRAGMA cipher_compatibility = 4;")
+        # 1. Decodificar ignorando errores (para saltar bytes binarios que no son texto)
+        texto_sucio = blob_data.decode('utf-8', errors='ignore')
+        
+        # 2. Usar Regex para mantener solo caracteres imprimibles válidos en varios idiomas
+        # Mantiene letras, números, puntuación básica, espacios y saltos de línea.
+        # Filtra caracteres de control extraños (ASCII < 32 excepto \n y \r)
+        texto_limpio = "".join(ch for ch in texto_sucio if ch.isprintable() or ch in ('\n', '\r', '\t'))
+        
+        # 3. Limpieza extra: Eliminar cadenas muy cortas que suelen ser ruido de metadatos
+        # (Opcional) A veces aparecen nombres de clases como "messageText" o "user".
+        return texto_limpio.strip()
+    except Exception:
+        return "[Error decodificando]"
 
-        # Traemos el último mensaje de índice
-        cursor.execute("SELECT message_id, data FROM messages WHERE dialog_id = ? ORDER BY message_id DESC LIMIT 5", (CANAL_ID,))
+def main():
+    print(f"📂 Leyendo base de datos: {DB_PATH}")
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
         
-        row = cursor.fetchone()
-        if row:
-            m_id, blob = row
-            datos = ProcesadorIndices.extraer_pares(blob)
-            renderizar_unigram_index(m_id // 1048576, datos)
+        # Seleccionamos ID y el BLOB de datos. Ordenamos por message_id (cronológico)
+        # Filtramos solo aquellos que tienen data
+        query = """
+        SELECT dialog_id, sender_user_id, data 
+        FROM messages 
+        WHERE data IS NOT NULL 
+        ORDER BY message_id DESC
+        LIMIT 100
+        """
         
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        
+        resultados = []
+        
+        print(f"🔍 Analizando los últimos {len(rows)} mensajes...")
+        
+        for dialog_id, sender_id, blob in rows:
+            # Extraer texto del binario
+            contenido = extraer_texto_limpio(blob)
+            
+            # Filtro simple: Si el contenido es muy corto o vacío, probablemente era una foto sin caption
+            if len(contenido) > 3: 
+                resultados.append({
+                    "Chat ID": dialog_id,
+                    "Sender ID": sender_id,
+                    "Contenido Rescatado": contenido
+                })
+
         conn.close()
+
+        # Mostrar resultados en consola
+        if resultados:
+            df = pd.DataFrame(resultados)
+            # Ajustar pandas para mostrar todo el texto
+            pd.set_option('display.max_colwidth', None)
+            print("\n✅ MENSAJES ENCONTRADOS (Muestra):")
+            print(df.to_string(index=False))
+            
+            # Guardar en archivo para lectura cómoda
+            with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+                f.write(f"REPORTE DE EXTRACCIÓN - {len(resultados)} mensajes\n")
+                f.write("="*50 + "\n\n")
+                for item in resultados:
+                    f.write(f"Chat: {item['Chat ID']} | User: {item['Sender ID']}\n")
+                    f.write(f"Mensaje: {item['Contenido Rescatado']}\n")
+                    f.write("-" * 20 + "\n")
+            print(f"\n💾 Reporte completo guardado en: {OUTPUT_FILE}")
+            
+        else:
+            print("⚠️ No se pudo rescatar texto legible. Es posible que los mensajes sean solo imágenes o metadatos puros.")
+
     except Exception as e:
-        console.print(f"[red]❌ Error: {e}[/]")
+        print(f"❌ Error: {e}")
 
 if __name__ == "__main__":
-    ejecutar()
+    main()

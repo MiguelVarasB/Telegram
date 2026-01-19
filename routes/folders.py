@@ -1,5 +1,6 @@
 """
 Rutas de carpetas (folders).
+Optimizado con límite de seguridad para evitar congelamiento del navegador.
 """
 import os
 import json
@@ -29,21 +30,9 @@ SCAN_CONCURRENCY = 2
 SCAN_SEMAPHORE = asyncio.Semaphore(SCAN_CONCURRENCY)
 
 
-def _parse_limite_videos(request: Request, default: int = 100) -> int:
-    val = request.query_params.get("limite") or request.query_params.get("limit")
-    try:
-        if val is None:
-            return default
-        return max(1, int(val))
-    except Exception:
-        return default
-
-
 def _parse_sort_params(request: Request):
     """
     Lee parámetros de ordenado permitidos.
-    sort: faltantes, indexados, totales, nombre, fecha_scan, ultimo_msg, completos
-    direction: asc | desc
     """
     allowed_sorts = {
         "faltantes",
@@ -65,15 +54,10 @@ def _parse_sort_params(request: Request):
 
 @router.get("/folder/{folder_id}")
 async def ver_carpeta(request: Request, folder_id: int, name: str = "Carpeta"):
-    """Vista de carpeta con lista de chats.
-
-    Nota: Los datos reales se cargan vía WebSocket para mejor rendimiento.
-    Esta función solo devuelve el template HTML inicial.
-    """
+    """Vista de carpeta con lista de chats."""
     log_timing(f" Iniciando endpoint /folder/{folder_id}..")
     sort, direction = _parse_sort_params(request)
 
-    # No cargamos datos aquí; los items se llenan vía WebSocket
     result = templates.TemplateResponse(MAIN_TEMPLATE, {
         "request": request,
         "items": [],
@@ -94,14 +78,20 @@ async def ver_carpeta(request: Request, folder_id: int, name: str = "Carpeta"):
 async def folder_ws(websocket: WebSocket, folder_id: int):
     """WebSocket para notificaciones de refresco de carpeta."""
     log_timing(f"WebSocket conectado para carpeta {folder_id}")
-    limite_videos_default = 999888777
+    
+    # --- FIX CRÍTICO: Límite de seguridad ---
+    # Antes era 999888777, lo que enviaba 1118 items y congelaba el navegador.
+    # 100 es un número seguro para renderizar de golpe.
+    limite_videos_default = 100 
+    
     await ws_manager.connect(folder_id, websocket)
-    # Enviar datos iniciales en segundo plano para no bloquear la conexión
+    
     async def send_initial_items():
         try:
             # Parámetros desde la URL del WS
             val_limit = websocket.query_params.get("limite") or websocket.query_params.get("limit")
             try:
+                # Si el frontend pide explícitamente más, se lo damos, si no, usamos el default seguro
                 limite_videos = max(1, int(val_limit)) if val_limit is not None else limite_videos_default
             except Exception:
                 limite_videos = limite_videos_default
@@ -109,25 +99,26 @@ async def folder_ws(websocket: WebSocket, folder_id: int):
             sort = websocket.query_params.get("sort", "faltantes").lower()
             direction = websocket.query_params.get("direction", "desc").lower()
   
+            log_timing(f"Consultando DB: folder={folder_id}, limit={limite_videos}, sort={sort}")
+
             if folder_id == -1:
-                
                 items = await get_all_chats_with_counts(
                     "Todos los canales",
                     limite_videos,
                     sort_field=sort,
                     direction=direction,
                 )
-            elif folder_id in [0, 1]:
-                items = await get_folder_items_from_db(folder_id, "Carpeta")
             else:
                 items = await get_folder_items_from_db(folder_id, "Carpeta")
+            
             await websocket.send_json({
                 "type": "init",
                 "items": items,
                 "sort": sort,
                 "direction": direction,
+                "total_count": len(items) # Útil para debug
             })
-            log_timing(f"Datos iniciales enviados: {len(items)} items")
+            log_timing(f"Datos enviados al navegador: {len(items)} items")
         except Exception as e:
             try:
                 await websocket.send_json({"type": "error", "message": str(e)})
@@ -236,13 +227,6 @@ async def _run_batch_scan(chat_ids: list[int], folder_id: int | None, job_id: st
 async def api_folder_scan_batch(
     body: dict = Body(..., example={"chat_ids": [123, 456], "folder_id": 1, "job_id": "opcional"}),
 ):
-    """
-    Recibe una lista de chat_ids a escanear. El backend controla la concurrencia (2 a la vez)
-    y emite progreso por WebSocket con los tipos:
-      - batch_scan_start
-      - batch_scan_update
-      - batch_scan_done
-    """
     chat_ids = body.get("chat_ids") or []
     if not isinstance(chat_ids, list) or not chat_ids:
         raise HTTPException(status_code=400, detail="chat_ids debe ser una lista no vacía")
@@ -250,7 +234,6 @@ async def api_folder_scan_batch(
     folder_id = body.get("folder_id")
     job_id = body.get("job_id") or str(uuid.uuid4())
 
-    # Lanzamos tarea en background (sin bloquear la respuesta HTTP)
     asyncio.create_task(_run_batch_scan(chat_ids, folder_id, job_id))
 
     return {

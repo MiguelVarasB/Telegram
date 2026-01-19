@@ -73,7 +73,7 @@ def obtener_fechas_y_ids(canales=None):
 # --- PRUEBA DE EJECUCIÓN ---
 if __name__ == "__main__":
     # Ejemplo con tu canal específico
-    canal_test = [-1001516713920,-1001081759083,-1001487754982]
+    canal_test = [-1002048144960]
     data = obtener_fechas_y_ids(canales=canal_test)
     
     print(json.dumps(data, indent=4))

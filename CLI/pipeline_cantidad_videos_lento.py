@@ -58,7 +58,7 @@ RUN_TS = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
 REPORT_PATH = os.path.join(ROOT_DIR, f"pipeline_report_{RUN_TS}.json")
 REPORT_ENTRIES: list[dict] = []
 
-Paso0=False
+Paso0=True
 
 def _add_report(step: str, status: str, data: dict | None = None) -> None:
     entry = {

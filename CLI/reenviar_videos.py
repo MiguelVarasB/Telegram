@@ -23,7 +23,7 @@ from utils import save_image_as_webp, log_timing
 from utils.database_helpers import ensure_column
 
 # --- CONFIGURACIÓN ---
-LIMITE =1000  # Cantidad de videos a procesar en esta vuelta
+LIMITE =10000  # Cantidad de videos a procesar en esta vuelta
 BATCH =   30  # Tamaño del paquete de reenvío (No subir de 30)
 SLEEP_ENVIO = (3, 10)  # rango de espera aleatoria entre envíos
 MAX_CHATS_CONCURRENTES = 3  # cuántos chats se procesan en paralelo
@@ -107,8 +107,9 @@ async def main():
 
     log_timing(f"📦 Encontrados {len(pendientes)} videos. Conectando Userbot...")
 
-    # 2. Conectar Userbot usando un clon de sesión para evitar locks
-    app = get_client(clone_for_cli=True)
+    # 2. Conectar Userbot usando una sesión dedicada para este script
+    app = get_client(custom_session_name="Reenvio_DUMP")
+
     if not app.is_connected:
         await app.start()
 

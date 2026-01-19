@@ -34,7 +34,7 @@ async def guardar_chats(limit: Optional[int] = None) -> None:
 
     # Resetear last_message_date a NULL para rehacer los valores con el escaneo actual
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE chats SET last_message_date = NULL, activo = 0")
+        await db.execute("UPDATE chats SET  activo = 0")
         await db.commit()
 
     client = get_client(clone_for_cli=True)

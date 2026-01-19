@@ -9,7 +9,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional, List, Tuple, Any, Dict
 from config import DB_PATH
-
+from utils import log_timing
 # Configuración de logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -112,11 +112,14 @@ def get_sync_connection() -> sqlite3.Connection:
     return conn
 
 async def init_db():
+
     """
     Inicializa la base de datos y crea las tablas necesarias si no existen.
     """
+    log_timing("➡️ Inicio init_db")
     async with get_db() as db:
         # Tabla de tags (traducciones básicas)
+        log_timing("   Creando tablas de tags...")
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS tags (
@@ -126,7 +129,7 @@ async def init_db():
             )
             """
         )
-
+        log_timing("   Creando tablas de chats...")
         # Crear tabla de chats
         await db.execute("""
             CREATE TABLE IF NOT EXISTS chats (
@@ -141,7 +144,7 @@ async def init_db():
                 updated_at TEXT
             )
         """)
-        
+        log_timing("   Creando tablas de chat_video_counts...")
         # Tabla de conteos de videos por chat
         await db.execute("""
             CREATE TABLE IF NOT EXISTS chat_video_counts (
@@ -152,7 +155,7 @@ async def init_db():
                 indexados INTEGER DEFAULT 0
             )
         """)
-        
+        log_timing("   Creando tablas chat_folders...")
         # Tabla de relación chat-carpeta
         await db.execute("""
             CREATE TABLE IF NOT EXISTS chat_folders (
@@ -161,7 +164,7 @@ async def init_db():
                 PRIMARY KEY (chat_id, folder_id)
             )
         """)
-        
+        log_timing("   Creando tablas videos_telegram...")
         # Tabla de videos
         await db.execute("""
             CREATE TABLE IF NOT EXISTS videos_telegram (
@@ -190,24 +193,24 @@ async def init_db():
                 PRIMARY KEY (chat_id, message_id)
             )
         """)
-        
+        log_timing("   Verificando idx_videos_oculto...")
         # Índices para mejorar el rendimiento de búsqueda
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_videos_oculto 
             ON videos_telegram(oculto)
         """)
-        
+        log_timing("   Verificando idx_videos_watch_later...")
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_videos_watch_later 
             ON videos_telegram(watch_later)
         """)
-        
+        log_timing("   Verificando idx_videos_chat_id...")
         # Índices para consultas por chat y sin thumb (usados en /api/stats)
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_videos_chat_id 
             ON videos_telegram(chat_id)
         """)
-
+        log_timing("   Verificando idx_videos_chat_thumb...")
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_videos_chat_thumb 
             ON videos_telegram(chat_id, has_thumb)
@@ -216,7 +219,9 @@ async def init_db():
         # Aplicar migraciones
         await _run_migrations(db)
         
+        
         await db.commit()
+        log_timing("✅ Fin init_db")
         logger.info("Base de datos inicializada correctamente")
 
 async def _run_migrations(db: aiosqlite.Connection):

@@ -1,5 +1,5 @@
 """
-Ruta principal (home) - Optimizada con cache.
+Ruta principal (home) - Optimizada con cache y recálculo en background.
 """
 import aiosqlite
 import asyncio
@@ -13,6 +13,9 @@ from config import TEMPLATES_DIR, MAIN_TEMPLATE, DB_PATH
 from database.connection import get_db
 from services import get_client
 from utils import obtener_id_limpio, formatear_miles, log_timing
+
+# 👇 IMPORTAMOS EL GATILLO DEL WORKER
+from database.counters import recalculate_all_stats_background
 
 router = APIRouter()
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -98,26 +101,25 @@ async def ver_home(request: Request):
     """Vista principal con lista de carpetas - Optimizada con cache."""
     log_timing(" Iniciando endpoint /..")
     
-    # Ejecutar todas las operaciones en paralelo
+    # 🔥 GATILLO: Disparar recálculo de estadísticas en segundo plano
+    # Esto actualiza la tabla de estadísticas si hubo cambios externos (CLI).
+    # Es no-bloqueante gracias a asyncio.create_task dentro de la función.
+    await recalculate_all_stats_background()
+    
+    # Ejecutar todas las operaciones de lectura en paralelo
     log_timing(" Obteniendo datos cacheados/en paralelo..")
     
-    # Crear tareas para ejecución paralela
     tasks = [
         _get_cached_filters(),
         _get_cached_videos_count(), 
         _get_cached_chats_count()
     ]
     
-    # Esperar todas las tareas en paralelo
     filtros, videos_total, chats_total = await asyncio.gather(*tasks, return_exceptions=True)
     
-    # Manejar excepciones
-    if isinstance(filtros, Exception):
-        filtros = []
-    if isinstance(videos_total, Exception):
-        videos_total = 0
-    if isinstance(chats_total, Exception):
-        chats_total = 0
+    if isinstance(filtros, Exception): filtros = []
+    if isinstance(videos_total, Exception): videos_total = 0
+    if isinstance(chats_total, Exception): chats_total = 0
     
     log_timing(f" Datos obtenidos: {len(filtros)} filtros, {videos_total} videos, {chats_total} chats")
     
@@ -137,7 +139,6 @@ async def ver_home(request: Request):
             include_p = getattr(f, 'include_peers', [])
             pinned_p = getattr(f, 'pinned_peers', [])
             
-            # Usar set para evitar duplicados
             ids_unicos = set(obtener_id_limpio(p) for p in include_p + pinned_p if obtener_id_limpio(p))
             cnt = len(ids_unicos)
             lista.append({

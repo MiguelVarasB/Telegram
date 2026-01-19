@@ -3,6 +3,7 @@ import asyncio
 import sys
 import logging
 from pathlib import Path
+from datetime import datetime, timedelta
 
 # Asegurar import desde la raíz del proyecto
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -25,6 +26,13 @@ BATCH_SIZE = 50
 
 # Flag para no recrear índices en cada chat
 _INDICES_VIDEO_MESSAGES_OK = False
+
+DIAS_ATRAS=2
+
+def _naive(dt):
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
 # ---------------------------------------------------------
 # Helpers de Base de Datos (Ahora Asíncronos y Seguros)
@@ -61,7 +69,7 @@ async def obtener_stats_chat(chat_id: int, db=None) -> tuple[int, int, int, int,
             COALESCE(videos_count, 0) - COALESCE(duplicados, 0) AS total_unicos,
             COALESCE(videos_count, 0),
             COALESCE(duplicados, 0),
-            (COALESCE(videos_count, 0) - COALESCE(duplicados, 0) - COALESCE(indexados, 0)) AS faltantes
+            (COALESCE(videos_count, 0) - COALESCE(indexados, 0)) AS faltantes
         FROM chat_video_counts
         WHERE chat_id = ?
         """,
@@ -82,8 +90,8 @@ async def obtener_chats_para_escanear(max_chats: int | None = None, only_chat_id
         WHERE cvc.videos_count > 0
           AND c.activo = 1
           AND COALESCE(c.is_owner, 0) = 0
-          AND (cvc.videos_count - COALESCE(cvc.duplicados, 0) - COALESCE(cvc.indexados, 0)) > 1
-        ORDER BY cvc.videos_count ASC
+          AND (cvc.videos_count - COALESCE(cvc.indexados, 0)) > 0
+        ORDER BY cvc.videos_count DESC
     """
     params = []
     if max_chats:
@@ -99,6 +107,36 @@ async def obtener_chats_para_escanear(max_chats: int | None = None, only_chat_id
         chats = [cid for cid in chats if cid == only_chat_id]
         
     return chats
+
+async def obtener_detalles_chats_para_filtrado(chat_ids: list[int]) -> dict[int, tuple[str, datetime | None, int, int]]:
+    """
+    Recupera nombre, last_message_date, indexados y faltantes para una lista de chat_ids.
+    Retorna un diccionario: {chat_id: (name, last_message_date, indexados, faltantes)}
+    """
+    if not chat_ids:
+        return {}
+
+    query = f"""
+        SELECT 
+            c.chat_id, 
+            c.name,
+            c.last_message_date, 
+            COALESCE(cvc.indexados, 0) as indexados,
+            (COALESCE(cvc.videos_count, 0) - COALESCE(cvc.indexados, 0)) AS faltantes
+        FROM chats c
+        LEFT JOIN chat_video_counts cvc ON c.chat_id = cvc.chat_id
+        WHERE c.chat_id IN ({','.join('?' for _ in chat_ids)})
+    """
+    
+    detalles = {}
+    async with get_db() as db:
+        async with db.execute(query, tuple(chat_ids)) as cursor:
+            rows = await cursor.fetchall()
+            for row in rows:
+                chat_id, name, last_date_str, indexados, faltantes = row
+                last_date = datetime.fromisoformat(last_date_str) if last_date_str else None
+                detalles[chat_id] = (name, last_date, indexados, faltantes)
+    return detalles
 
 # ---------------------------------------------------------
 # WORKER: GRABADOR EN SEGUNDO PLANO
@@ -134,13 +172,19 @@ async def escanear_chat_inteligente(
     chat_id: int,
     consecutivos_para_detener: int = 30,
     max_nuevos_por_chat: int | None = None,
+    detalles_chats: dict[int, tuple[str, datetime | None, int, int]] | None = None,
 ):
     # Reusar conexión única para todo el flujo del chat
     db = await get_db_connection()
     # Stats iniciales
     indexados, total_unicos, videos_count, duplicados, faltantes = await obtener_stats_chat(chat_id, db)
+    name, last_date = "?", None
+    if detalles_chats and chat_id in detalles_chats:
+        name, last_date, indexados, faltantes = detalles_chats[chat_id]
+    last_date = _naive(last_date)
+    max_fecha_mensajes = None
     log_timing(
-        f"\n📺 Canal {chat_id} | Videos: {videos_count} | Indexados: {indexados} | "
+        f"\n📺 Canal {name} | ID: {chat_id} | ultimo mensaje: {last_date} |Videos: {videos_count} | Indexados: {indexados} | "
         f"Duplicados: {duplicados} | Únicos: {total_unicos} | Faltan aprox: {faltantes}"
     )
 
@@ -191,12 +235,17 @@ async def escanear_chat_inteligente(
 
             mensajes_leidos_total += 1
             nombre = (m.video.file_name if m.video else m.document.file_name) or "sin_nombre"
+
+            # Registrar fecha más reciente si el chat no tiene last_message_date
+            if last_date is None and getattr(m, "date", None):
+                fecha_msg = _naive(m.date)
+                if fecha_msg:
+                    if max_fecha_mensajes is None or fecha_msg > max_fecha_mensajes:
+                        max_fecha_mensajes = fecha_msg
             
             if m.id in ids_locales:
                 consecutivos_existentes += 1
-                # Log reducido para no saturar consola, mostrar cada 10
-                if consecutivos_existentes % 5 == 0 or consecutivos_existentes == 1:
-                    log_timing(f"  ℹ️  Ya existe ({consecutivos_existentes}/{consecutivos_para_detener}): {nombre[:30]} | msg_id={m.id}")
+                log_timing(f"  ℹ️  Ya existe ({consecutivos_existentes}/{consecutivos_para_detener}): {nombre[:30]} | msg_id={m.id}")
                 
                 if consecutivos_existentes >= consecutivos_para_detener:
                     log_timing(f"🛑 Umbral de detención alcanzado ({consecutivos_existentes} existentes seguidos).")
@@ -223,9 +272,26 @@ async def escanear_chat_inteligente(
         logger.error(f"❌ Error en escaneo del chat {chat_id}: {e}", exc_info=True)
     
     finally:
+        log_timing(f"⏳ Finalizando chat {chat_id}. Enviando señal de parada al worker...")
         await queue.put(None)
+        log_timing(f"⏳ Esperando que el worker del chat {chat_id} guarde el último lote...")
         await worker_task
+        log_timing(f"✅ Worker del chat {chat_id} finalizado.")
         log_timing(f"📊 Chat {chat_id} finalizado. {nuevos_detectados} nuevos guardados.")
+
+        # Si el chat no tenía last_message_date, usar la fecha más reciente encontrada
+        if last_date is None and max_fecha_mensajes is not None:
+            try:
+                await db.execute(
+                    "UPDATE chats SET last_message_date = ? WHERE chat_id = ?",
+                    (max_fecha_mensajes.isoformat(), chat_id),
+                )
+                await db.commit()
+                log_timing(
+                    f"🗓️ last_message_date actualizado para {chat_id} -> {max_fecha_mensajes.isoformat()}"
+                )
+            except Exception as e:
+                log_timing(f"⚠️ No se pudo actualizar last_message_date para {chat_id}: {e}")
         await db.close()
 
 # ---------------------------------------------------------
@@ -245,7 +311,32 @@ async def sync_con_stop(
         await client.start()
         started_here = True
     try:
-        chats = await obtener_chats_para_escanear(max_chats, only_chat_id)
+        chats_iniciales = await obtener_chats_para_escanear(max_chats, only_chat_id)
+        log_timing(f"🔎 Chats candidatos iniciales: {len(chats_iniciales)}")
+
+        # --- Filtro Adicional --- #
+        detalles_chats = await obtener_detalles_chats_para_filtrado(chats_iniciales)
+        chats_filtrados = []
+        dias_atras = datetime.now() - timedelta(days=DIAS_ATRAS)
+        
+        for chat_id in chats_iniciales:
+            detalles = detalles_chats.get(chat_id)
+            if not detalles:
+                chats_filtrados.append(chat_id)
+                continue
+
+            name, last_date, indexados, faltantes = detalles
+            
+            # Condición de exclusión: si el último mensaje es antiguo Y ya hay suficientes indexados
+            if last_date and last_date < dias_atras and indexados > 30 and faltantes > 0:
+                log_timing(f"  -> Excluyendo chat '{name}' ({chat_id}): Sin actividad reciente ({last_date.strftime('%Y-%m-%d')}) y {indexados} indexados.")
+                continue
+            
+            chats_filtrados.append(chat_id)
+        
+        chats = chats_filtrados
+        # --- Fin Filtro --- #
+
         log_timing(f"🚀 Iniciando revisión de {len(chats)} chats (concurrencia: {concurrencia})...")
         
         # Procesar en lotes concurrentes para evitar el delay de 11s entre chats
@@ -256,16 +347,24 @@ async def sync_con_stop(
                     client, 
                     cid, 
                     consecutivos_para_detener=consecutivos_para_detener,
-                    max_nuevos_por_chat=max_nuevos_por_chat
+                    max_nuevos_por_chat=max_nuevos_por_chat,
+                    detalles_chats=detalles_chats
                 )
                 for cid in batch
             ]
             await asyncio.gather(*tasks)
     finally:
         if client.is_connected and started_here:
-            await client.stop()
+            log_timing("⏳ Desconectando cliente de Telegram (timeout: 15s)...")
+            try:
+                await asyncio.wait_for(client.stop(), timeout=15.0)
+                log_timing("✅ Cliente de Telegram desconectado.")
+            except asyncio.TimeoutError:
+                log_timing("⚠️ Timeout al desconectar el cliente. Forzando salida.")
+            except Exception as e:
+                log_timing(f"❌ Error al desconectar cliente: {e}")
 
-if __name__ == "__main__":
+async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-chats", type=int, default=None)
     parser.add_argument("--only-chat-id", type=int, default=None)
@@ -273,14 +372,28 @@ if __name__ == "__main__":
     parser.add_argument("--max-nuevos-chat", type=int, default=None)
     parser.add_argument("--concurrencia", type=int, default=1, help="Número de chats a procesar en paralelo (aumentar con cuidado, puede causar flood wait)")
     args = parser.parse_args()
-    
+
+    await sync_con_stop(
+        max_chats=args.max_chats,
+        only_chat_id=args.only_chat_id,
+        consecutivos_para_detener=args.consecutivos,
+        max_nuevos_por_chat=args.max_nuevos_chat,
+        concurrencia=args.concurrencia
+    )
+
+if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    main_task = loop.create_task(main())
+
     try:
-        asyncio.run(sync_con_stop(
-            max_chats=args.max_chats,
-            only_chat_id=args.only_chat_id,
-            consecutivos_para_detener=args.consecutivos,
-            max_nuevos_por_chat=args.max_nuevos_chat,
-            concurrencia=args.concurrencia
-        ))
+        loop.run_until_complete(main_task)
     except KeyboardInterrupt:
-        log_timing("\n🛑 Interrumpido por el usuario.")
+        log_timing("\n🛑 Interrupción por teclado detectada. Cancelando tareas...")
+        main_task.cancel()
+        # Esperar a que las tareas se cancelen
+        loop.run_until_complete(main_task)
+    except Exception as e:
+        logger.error(f"Error inesperado en el bucle principal: {e}", exc_info=True)
+    finally:
+        log_timing("\n👋 Script finalizado.")
+        loop.close()
