@@ -26,6 +26,28 @@ except ImportError as e:
 
 Excluir = [CACHE_DUMP_VIDEOS_CHANNEL_ID, -1002670762200, -1002621670240]
 
+async def ensure_scan_history_table(db):
+    """Crea la tabla de historial de escaneos si no existe."""
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS scan_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            chat_nombre TEXT,
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ended_at DATETIME,
+            offset_inicio INTEGER,
+            piso_id INTEGER,
+            videos INTEGER DEFAULT 0,
+            fotos INTEGER DEFAULT 0,
+            documentos INTEGER DEFAULT 0,
+            otros INTEGER DEFAULT 0,
+            nuevos_db INTEGER DEFAULT 0
+        )
+        """
+    )
+    await db.commit()
+
 async def obtener_chats_con_historial(db):
     """
     Obtiene chats activos con videos, excluyendo aquellos que ya 
@@ -70,6 +92,13 @@ async def escanear_historia_antigua(client, db, chat_id, chat_nombre):
         return 
 
     log_timing(f"\n🚀 {chat_nombre} | Continuando hacia atrás desde ID: {offset_id}")
+
+    # Registramos el inicio del escaneo en la tabla de historial
+    scan_cursor = await db.execute(
+        "INSERT INTO scan_history (chat_id, chat_nombre, offset_inicio) VALUES (?, ?, ?)",
+        (chat_id, chat_nombre, offset_id)
+    )
+    scan_id = scan_cursor.lastrowid
 
     stats = {"videos": 0, "fotos": 0, "documentos": 0, "otros": 0, "nuevos_db": 0}
     count_total = 0
@@ -121,25 +150,34 @@ async def escanear_historia_antigua(client, db, chat_id, chat_nombre):
         # Procesar remanentes al salir del bucle
         await procesar_lote_pendiente()
 
-        # --- CHEQUEO FINAL DE SEGURIDAD ---
-        # Volvemos a pedir el historial desde el último punto alcanzado para confirmar vacío
+        # --- MARCAR PISO DEL CHAT ---
+        # Al terminar el escaneo asumimos que ya alcanzamos el inicio histórico del canal.
         async with db.execute("SELECT MIN(message_id) FROM video_messages WHERE chat_id = ?", (chat_id,)) as cur:
             last_min_row = await cur.fetchone()
             piso_id = last_min_row[0] if last_min_row else None
 
-        confirmacion_vacio = True
         if piso_id:
-            async for _ in client.get_chat_history(chat_id, offset_id=piso_id, limit=5):
-                confirmacion_vacio = False # Si entra aquí, es que Telegram aún tenía algo
-                break
+            await db.execute(
+                "UPDATE video_messages SET is_first_video = 1 WHERE chat_id = ? AND message_id = ?",
+                (chat_id, piso_id)
+            )
+            log_timing(f"📍 Marcado ID {piso_id} como ORIGEN (piso) de {chat_nombre}")
 
-            if confirmacion_vacio:
-                # Marcamos el video más antiguo de este chat como el "Primero"
-                await db.execute(
-                    "UPDATE video_messages SET is_first_video = 1 WHERE chat_id = ? AND message_id = ?",
-                    (chat_id, piso_id)
-                )
-                log_timing(f"📍 Marcado ID {piso_id} como ORIGEN (piso) de {chat_nombre}")
+        # Guardamos estadísticas finales del escaneo histórico
+        await db.execute(
+            """
+            UPDATE scan_history
+            SET ended_at = datetime('now'),
+                piso_id = ?,
+                videos = ?,
+                fotos = ?,
+                documentos = ?,
+                otros = ?,
+                nuevos_db = ?
+            WHERE id = ?
+            """,
+            (piso_id, stats["videos"], stats["fotos"], stats["documentos"], stats["otros"], stats["nuevos_db"], scan_id)
+        )
 
         # Actualizar timestamp de escaneo
         await db.execute(
@@ -164,7 +202,8 @@ async def main():
         # Optimizaciones importantes para escritura masiva
         await db.execute("PRAGMA journal_mode = WAL")
         await db.execute("PRAGMA synchronous = OFF") # Arriesgado si se va la luz, pero muy rápido
-        
+        await ensure_scan_history_table(db)
+
         chats = await obtener_chats_con_historial(db)
         log_timing(f"🔥 Analizando historial de {len(chats)} canales...")
 

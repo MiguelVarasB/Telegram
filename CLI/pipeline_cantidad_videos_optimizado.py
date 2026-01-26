@@ -39,20 +39,23 @@ from utils import log_timing
 
 
 # Reuso de scripts existentes
-from CLI.cantidad_videos_lento.auditar_conteo_videos_chats import (  # noqa: E402
+from CLI.cantidad_videos_optimizado.auditar_conteo_videos_chats import (  # noqa: E402
     contar_videos_en_todos_mis_chats,
 )
-from CLI.cantidad_videos_lento.recalcular_indexados_desde_bd import (  # noqa: E402
+from CLI.cantidad_videos_optimizado.recalcular_indexados_desde_bd import (  # noqa: E402
     main as recalcular_indexados_main,
 )
-from CLI.cantidad_videos_lento.indexador_historico import (  # noqa: E402
+from CLI.cantidad_videos_optimizado.indexador_historico import (  # noqa: E402
     obtener_chats_con_historial,
     escanear_historia_antigua,
 )
-from CLI.cantidad_videos_lento.sincronizador_con_stop import (  # noqa: E402
+from CLI.cantidad_videos_optimizado.sincronizador_con_stop import (  # noqa: E402
     sync_con_stop,
 )
-from CLI.cantidad_videos_lento.guardar_chats import guardar_chats  # noqa: E402
+from CLI.cantidad_videos_optimizado.obtener_videos_recientes_global import (  # noqa: E402
+    obtener_videos_recientes_global,
+)
+from CLI.cantidad_videos_optimizado.guardar_chats import guardar_chats  # noqa: E402
 
 RUN_TS = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
 REPORT_PATH = os.path.join(ROOT_DIR, f"pipeline_report_{RUN_TS}.json")
@@ -171,6 +174,16 @@ async def indexar_historico_async(max_chats: int | None = None) -> None:
 async def run_pipeline(args: argparse.Namespace) -> None:
     await init_db()
     log_timing("\n=== Iniciando pipeline lento ===")
+
+    log_timing("\n=== Paso -1: Obtener últimos videos recientes (search_global) ===")
+    log_timing("Iniciando paso -1")
+    if args.dry_run:
+        log_timing("Saltado (dry-run).")
+        _add_report("paso-1_recientes", "skipped", {"reason": "dry_run"})
+    else:
+        await obtener_videos_recientes_global()
+        _add_report("paso-1_recientes", "ok")
+    log_timing("Terminando paso -1")
 
     if(Paso0):
         log_timing("\n=== Paso 0: Guardar/actualizar chats ===")

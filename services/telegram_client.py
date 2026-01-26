@@ -65,19 +65,26 @@ def get_client(
 ) -> Client:
     """Retorna un cliente de Pyrogram cacheado por session_name.
 
+    Si la sesión no existe, intenta copiarla desde la sesión principal.
     Si se pasa custom_session_name, se utilizará ese nombre y ruta.
     """
     os.makedirs(FOLDER_SESSIONS, exist_ok=True)
 
     if custom_session_name:
         session_name = custom_session_name
-        session_path = os.path.join(FOLDER_SESSIONS, session_name)
     elif clone_for_cli:
         session_name = SESSION_NAME_CLI
-        session_path = os.path.join(FOLDER_SESSIONS, session_name)
     else:
         session_name = SESSION_NAME_SERVER if use_server_session else SESSION_NAME
-        session_path = os.path.join(FOLDER_SESSIONS, session_name)
+
+    session_path = os.path.join(FOLDER_SESSIONS, session_name)
+
+    # Si la sesión no existe, la copiamos desde la principal
+    main_session_file = f"{os.path.join(FOLDER_SESSIONS, SESSION_NAME)}.session"
+    target_session_file = f"{session_path}.session"
+
+    if not os.path.exists(target_session_file) and os.path.exists(main_session_file):
+        _copy_session_files(SESSION_NAME, session_name)
 
     return _get_or_create_client(session_name, session_path)
 

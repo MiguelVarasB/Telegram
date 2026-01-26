@@ -23,7 +23,7 @@ from utils import log_timing
 # CONFIGURACIÓN
 UMBRAL_DIAS = -1      # -1 para ignorar antigüedad y usar solo escaneo reciente
 UMBRAL_MINUTOS = 180  # Si se escaneó hace menos de X minutos, se salta
-CONCURRENCY = 10      # Número de chats simultáneos (Tu Xeon aguanta esto y más)
+CONCURRENCY = 5      # Número de chats simultáneos (Tu Xeon aguanta esto y más)
 
 async def procesar_chat_individual(sem, client, row, ahora, fecha_limite):
     """
@@ -43,13 +43,18 @@ async def procesar_chat_individual(sem, client, row, ahora, fecha_limite):
         except: pass
 
     # 2. Lógica de Salto (Skip)
+    # Saltar chats muy recientes con pocos videos
+    if last_date and last_date >= ahora - datetime.timedelta(days=2) and videos_count_bd <= 0:
+        log_timing(f"⏭️ Saltado ( por antiguedad): {titulo[:20]}...") 
+        return None
+
     if UMBRAL_DIAS < 0:
         # Modo "Refresco": Saltar solo si se escaneó hace muy poco (ej. < 3 horas)
         if scanned_at:
             try:
                 scanned_dt = datetime.datetime.fromisoformat(scanned_at)
                 if scanned_dt >= ahora - datetime.timedelta(minutes=UMBRAL_MINUTOS):
-                    # log_timing(f"⏭️ Saltado (Reciente): {titulo[:20]}...") 
+                    log_timing(f"⏭️ Saltado (Reciente): {titulo[:20]}...") 
                     return None # Saltamos silenciosamente para no ensuciar log
             except: pass
     else:

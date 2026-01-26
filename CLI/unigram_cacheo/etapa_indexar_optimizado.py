@@ -1,16 +1,12 @@
 """
-ETAPA INDEXAR - Versión Optimizada para Multi-Núcleo (CORREGIDA)
-====================================================
+ETAPA INDEXAR - Estrategia Inversa (Ultra-Rápida)
+==================================================
+Optimización para Windows y Hardware de Alto Rendimiento (32 Cores).
 
-Este archivo es una versión optimizada del indexador de archivos multimedia de Telegram
-diseñada específicamente para hardware de alto rendimiento (15 núcleos, 64GB RAM).
-
-OPTIMIZACIONES IMPLEMENTADAS:
-------------------------------
-1. Procesamiento paralelo real con multiprocessing (uso de todos los núcleos CPU)
-2. Inicialización de memoria compartida para workers
-3. Indexación por lotes para mejor uso de caché
-4. Búsqueda binaria optimizada con early termination
+ESTRATEGIA:
+En lugar de enviar 400MB de mensajes a cada worker (lo que satura la RAM/Bus en Windows),
+enviamos la lista de archivos buscados (20KB) a todos los workers y repartimos
+los mensajes en bloques pequeños.
 """
 
 import os
@@ -18,14 +14,13 @@ import struct
 import re
 import datetime
 import time
-from typing import Iterable, List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Set
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-import threading
+import sqlite3
 
-# Importar componentes del proyecto
+# Importaciones locales
 from .common import (
     CARPETAS,
-    MASTER_KEY,
     DB_UNIGRAM,
     preparar_base_local,
     obtener_duracion_video,
@@ -33,203 +28,223 @@ from .common import (
 )
 from .config_optimizacion import (
     MAX_WORKERS, 
-    BATCH_SIZE, 
     DB_COMMIT_SIZE, 
-    CHUNK_SIZE,
-    LOG_BATCH_SIZE,
     ENABLE_DETAILED_LOGGING
 )
 
-# Configuración de logs externos
+# Configuración de logs
 import sys
-sys.path.append(r'C:\Users\TheMiguel\Downloads\Soft\#Mios\Telegram')
-from utils import log_timing
+# Ajusta esta ruta si es necesario o usa ruta relativa si utils está en path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from utils import log_timing
+except ImportError:
+    def log_timing(s): print(f"[{datetime.datetime.now().time()}] {s}")
 
-# Variable global que residirá en el espacio de memoria de cada proceso worker
-_global_messages_data = None
+# --- ESTRUCTURAS DE DATOS PARA WORKERS ---
 
-def init_worker(messages_data: List[Tuple]):
+def worker_scan_messages(messages_chunk: List[Tuple], target_huellas: Dict[bytes, str]) -> List[Dict]:
     """
-    Inicializa cada proceso hijo con la copia de los mensajes en memoria.
-    Esto permite que la búsqueda sea ultra rápida sin acceder a disco.
+    Worker optimizado: Recibe un fragmento de mensajes y busca CUALQUIER huella objetivo en ellos.
+    Retorna las coincidencias encontradas.
     """
-    global _global_messages_data
-    _global_messages_data = messages_data
-
-def buscar_huella_en_mensajes(huella_bin: bytes) -> Tuple[Optional[int], Optional[int]]:
-    """Búsqueda optimizada de huella binaria en los mensajes cargados."""
-    global _global_messages_data
+    matches = []
     
-    if not _global_messages_data:
-        return None, None
+    # Pre-cachear longitudes para evitar llamadas en el bucle
+    target_len = 8 # int64 son 8 bytes
     
-    # Búsqueda lineal optimizada en memoria
-    for m_id, d_id, data_blob in _global_messages_data:
-        if data_blob and huella_bin in data_blob:
-            return d_id, m_id // 1048576 # Conversión a ID global
-    
-    return None, None
-
-def procesar_archivo_batch(archivos_batch: List[Dict]) -> List[Dict]:
-    """Procesa un lote de archivos aprovechando el núcleo asignado."""
-    resultados = []
-    
-    for item in archivos_batch:
-        nombre_f = item["nombre"]
-        match = re.search(r"(\d{15,20})", nombre_f)
-        
-        if not match:
-            if item["tipo"] == "video":
-                try:
-                    tamano_bytes = os.path.getsize(item["ruta"])
-                    duracion_segundos = obtener_duracion_video(item["ruta"])
-                    resultados.append({
-                        "archivo": nombre_f, "tipo": item["tipo"],
-                        "fecha_escaneo": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "encontrado": 0, "canal_id": None, "msg_id_global": None,
-                        "tamano_bytes": tamano_bytes, "duracion_segundos": duracion_segundos,
-                    })
-                except Exception: continue
+    for m_id, d_id, data_blob in messages_chunk:
+        if not data_blob or len(data_blob) < target_len:
             continue
-        
-        # Procesamiento con huella binaria
-        id_cache_num = int(match.group(1))
-        huella_bin = struct.pack("<q", id_cache_num)
-        
-        try:
-            tamano_bytes = os.path.getsize(item["ruta"])
-            duracion_segundos = obtener_duracion_video(item["ruta"]) if item["tipo"] == "video" else None
             
-            # Búsqueda en la memoria compartida del worker
-            canal_id, msg_id_global = buscar_huella_en_mensajes(huella_bin)
-            
-            resultados.append({
-                "archivo": nombre_f, "tipo": item["tipo"],
-                "fecha_escaneo": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "encontrado": 1 if canal_id is not None else 0,
-                "canal_id": canal_id, "msg_id_global": msg_id_global,
-                "tamano_bytes": tamano_bytes, "duracion_segundos": duracion_segundos,
-            })
-        except Exception: continue
-            
-    return resultados
+        # Búsqueda optimizada: Verificar si alguna huella está en el blob
+        # Python 'in' operator es muy rápido (implementado en C)
+        for huella, nombre_archivo in target_huellas.items():
+            if huella in data_blob:
+                matches.append({
+                    "archivo": nombre_archivo,
+                    "canal_id": d_id,
+                    "msg_id_global": m_id // 1048576
+                })
+                # No hacemos break porque un mensaje podría teóricamente contener referencias a múltiples archivos
+                # o el mismo archivo estar referenciado múltiples veces (aunque raro)
+                
+    return matches
 
-def iter_archivos_nuevos_optimizado(archivos_ya_indexados: set) -> List[Dict]:
-    """Escanea carpetas usando múltiples hilos para acelerar el listado de archivos."""
+def _escanear_carpetas_rapido(archivos_ya_indexados: Set[str]) -> Tuple[List[Dict], List[Dict]]:
+    """Identifica archivos nuevos y separa los que tienen ID de los que no."""
     extensiones = ('.jpg', '.png', '.mp4', '.m4v', '.mov', '.bin')
-    lista = []
+    archivos_con_id = []
+    archivos_sin_id = []
     
+    # Escaneo paralelo de IO
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = []
         for tipo, ruta in CARPETAS.items():
             if os.path.exists(ruta):
-                futures.append(executor.submit(_escanear_carpeta, ruta, tipo, extensiones, archivos_ya_indexados))
+                futures.append(executor.submit(_listar_dir, ruta, tipo, extensiones, archivos_ya_indexados))
         
         for future in as_completed(futures):
-            lista.extend(future.result())
-    
-    lista.sort(key=lambda x: x["fecha_creacion"], reverse=True)
-    return lista
+            con_id, sin_id = future.result()
+            archivos_con_id.extend(con_id)
+            archivos_sin_id.extend(sin_id)
+            
+    # Ordenar por fecha (más recientes primero)
+    archivos_con_id.sort(key=lambda x: x["fecha_creacion"], reverse=True)
+    return archivos_con_id, archivos_sin_id
 
-def _escanear_carpeta(ruta: str, tipo: str, extensiones: tuple, archivos_ya_indexados: set) -> List[Dict]:
-    resultados = []
+def _listar_dir(ruta, tipo, extensiones, ya_indexados):
+    con_id = []
+    sin_id = []
     try:
         for f in os.listdir(ruta):
+            if f in ya_indexados:
+                continue
             if f.lower().endswith(extensiones) or f.isdigit():
-                if f not in archivos_ya_indexados:
-                    full_path = os.path.join(ruta, f)
-                    try:
-                        resultados.append({
-                            "nombre": f, "tipo": tipo, "ruta": full_path,
-                            "fecha_creacion": os.path.getctime(full_path),
-                        })
-                    except OSError: continue
+                full_path = os.path.join(ruta, f)
+                try:
+                    info = {
+                        "nombre": f, "tipo": tipo, "ruta": full_path,
+                        "fecha_creacion": os.path.getctime(full_path),
+                        "tamano": os.path.getsize(full_path)
+                    }
+                    if re.search(r"(\d{15,20})", f):
+                        con_id.append(info)
+                    else:
+                        sin_id.append(info)
+                except OSError: continue
     except OSError: pass
-    return resultados
+    return con_id, sin_id
 
-def procesar_archivos_paralelo(lista_a_procesar: Iterable[Dict]) -> None:
-    """Orquestador principal del procesamiento multi-núcleo."""
-    conn_local, _ = preparar_base_local()
+def procesar_estrategia_inversa():
+    """Motor principal de procesamiento."""
+    conn_local, existentes = preparar_base_local()
     
-    log_timing("🔄 Cargando mensajes de Unigram en memoria...")
+    log_timing("📂 Escaneando sistema de archivos...")
+    archivos_con_id, archivos_sin_id = _escanear_carpetas_rapido(existentes)
+    
+    if not archivos_con_id and not archivos_sin_id:
+        log_timing("☕ No hay archivos nuevos.")
+        conn_local.close()
+        return
+
+    log_timing(f"🎯 Nuevos: {len(archivos_con_id)} con ID (buscables), {len(archivos_sin_id)} sin ID.")
+
+    cur_local = conn_local.cursor()
+    fecha_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    pendientes_commit = 0
+    
+    # 1. Guardar archivos SIN ID inmediatamente (no se pueden buscar en DB)
+    if archivos_sin_id:
+        log_timing(f"💾 Guardando {len(archivos_sin_id)} archivos sin ID...")
+        for item in archivos_sin_id:
+            dur = obtener_duracion_video(item["ruta"]) if item["tipo"] == "video" else None
+            cur_local.execute(
+                "INSERT OR IGNORE INTO cacheo (archivo, tipo, fecha_escaneo, encontrado, tamano_bytes, duracion_segundos) VALUES (?,?,?,0,?,?)",
+                (item["nombre"], item["tipo"], fecha_now, item["tamano"], dur)
+            )
+        conn_local.commit()
+
+    if not archivos_con_id:
+        conn_local.close()
+        return
+
+    # 2. Preparar búsqueda inversa
+    log_timing("🔄 Cargando y particionando mensajes...")
     _, todos_los_mensajes = cargar_mensajes_unigram()
     
-    # Filtrar mensajes útiles para reducir el tamaño de la memoria enviada a los workers
-    mensajes_procesados = [(m_id, d_id, data) for m_id, d_id, data in todos_los_mensajes if data is not None]
-    log_timing(f"🔧 {len(mensajes_procesados)} mensajes cargados y listos para búsqueda paralela.")
+    # Filtrar solo mensajes con blob válido
+    msgs_validos = [m for m in todos_los_mensajes if m[2] is not None]
+    total_msgs = len(msgs_validos)
     
-    lista_archivos = list(lista_a_procesar)
-    chunks = [lista_archivos[i:i + CHUNK_SIZE] for i in range(0, len(lista_archivos), CHUNK_SIZE)]
+    # Crear diccionario de búsqueda {huella_bytes: nombre_archivo}
+    target_huellas = {}
+    file_info_map = {} # Para acceso rápido a metadatos al guardar
     
-    nuevos_hallazgos = 0
-    pendientes = 0
+    for item in archivos_con_id:
+        match = re.search(r"(\d{15,20})", item["nombre"])
+        if match:
+            uid = int(match.group(1))
+            huella = struct.pack("<q", uid)
+            target_huellas[huella] = item["nombre"]
+            file_info_map[item["nombre"]] = item
+
+    # Calcular chunks de mensajes
+    # Dividimos los mensajes entre los workers.
+    # Windows start method 'spawn' es lento copiando datos, pero aquí copiamos
+    # solo 1/32 de los datos a cada worker, lo cual es mucho más rápido.
+    chunk_size = max(1, total_msgs // MAX_WORKERS)
+    chunks = [msgs_validos[i:i + chunk_size] for i in range(0, total_msgs, chunk_size)]
+    
+    log_timing(f"🚀 Lanzando {len(chunks)} workers para escanear {total_msgs} mensajes contra {len(target_huellas)} archivos...")
+    
+    found_map = {} # nombre_archivo -> {datos_match}
+    
     start_time = time.time()
     
-    log_timing(f"🚀 Saturando CPU: {len(chunks)} bloques con {MAX_WORKERS} núcleos...")
-    
-    try:
-        cur_local = conn_local.cursor()
+    # EJECUCIÓN PARALELA
+    with ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Enviamos: chunk de mensajes (grande) + target_huellas (pequeño)
+        futures = [executor.submit(worker_scan_messages, chunk, target_huellas) for chunk in chunks]
         
-        # CORRECCIÓN CLAVE: initializer e initargs para pasar los mensajes a los workers
-        with ProcessPoolExecutor(
-            max_workers=MAX_WORKERS,
-            initializer=init_worker,
-            initargs=(mensajes_procesados,)
-        ) as executor:
-            
-            futures = [executor.submit(procesar_archivo_batch, chunk) for chunk in chunks]
-            
-            for i, future in enumerate(as_completed(futures)):
-                try:
-                    resultados_batch = future.result()
-                    for res in resultados_batch:
-                        cur_local.execute(
-                            """
-                            INSERT OR IGNORE INTO cacheo
-                            (archivo, tipo, fecha_escaneo, encontrado, canal_id, msg_id_global, tamano_bytes, duracion_segundos, en_servidor, unique_id)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (res["archivo"], res["tipo"], res["fecha_escaneo"], res["encontrado"],
-                             res["canal_id"], res["msg_id_global"], res["tamano_bytes"], res["duracion_segundos"], 0, None)
-                        )
-                        nuevos_hallazgos += 1
-                        pendientes += 1
-                        
-                        if res["encontrado"] and ENABLE_DETAILED_LOGGING:
-                            log_timing(f"  ✅ {res['tipo'][:3].upper()} {res['archivo']} -> MSG: {res['msg_id_global']}")
+        for i, future in enumerate(as_completed(futures)):
+            try:
+                matches = future.result()
+                for m in matches:
+                    # Guardamos el primer match encontrado para cada archivo
+                    if m["archivo"] not in found_map:
+                        found_map[m["archivo"]] = m
+                        if ENABLE_DETAILED_LOGGING:
+                             log_timing(f"  ✅ MATCH: {m['archivo']} -> MSG {m['msg_id_global']}")
+            except Exception as e:
+                log_timing(f"❌ Error en worker: {e}")
+                
+            if (i+1) % 5 == 0:
+                log_timing(f"📊 Progreso escaneo: {((i+1)/len(chunks))*100:.1f}%")
 
-                    # Commit por lotes para no bloquear la BD
-                    if pendientes >= DB_COMMIT_SIZE:
-                        conn_local.commit()
-                        pendientes = 0
-                    
-                    if (i + 1) % LOG_BATCH_SIZE == 0 or i == len(futures) - 1:
-                        progreso = (i + 1) / len(futures) * 100
-                        log_timing(f"📊 Progreso: {progreso:.1f}% ({i+1}/{len(futures)} bloques)")
-                        
-                except Exception as e:
-                    log_timing(f"❌ Error en bloque: {e}")
+    scan_time = time.time() - start_time
+    log_timing(f"🏁 Escaneo finalizado en {scan_time:.1f}s")
+    
+    # 3. Guardar resultados
+    log_timing("💾 Guardando resultados en DB...")
+    nuevos = 0
+    encontrados = 0
+    
+    for item in archivos_con_id:
+        nombre = item["nombre"]
+        match = found_map.get(nombre)
         
-        if pendientes:
-            conn_local.commit()
+        dur = obtener_duracion_video(item["ruta"]) if item["tipo"] == "video" else None
+        
+        if match:
+            encontrados += 1
+            cur_local.execute(
+                """INSERT OR IGNORE INTO cacheo 
+                   (archivo, tipo, fecha_escaneo, encontrado, canal_id, msg_id_global, tamano_bytes, duracion_segundos, en_servidor)
+                   VALUES (?, ?, ?, 1, ?, ?, ?, ?, 0)""",
+                (nombre, item["tipo"], fecha_now, match["canal_id"], match["msg_id_global"], item["tamano"], dur)
+            )
+        else:
+            # Archivo con ID pero no encontrado en los mensajes
+            cur_local.execute(
+                """INSERT OR IGNORE INTO cacheo 
+                   (archivo, tipo, fecha_escaneo, encontrado, tamano_bytes, duracion_segundos, en_servidor)
+                   VALUES (?, ?, ?, 0, ?, ?, 0)""",
+                (nombre, item["tipo"], fecha_now, item["tamano"], dur)
+            )
             
-        elapsed_total = time.time() - start_time
-        log_timing(f"\n✨ Indexación completada en {elapsed_total:.1f}s ({nuevos_hallazgos / elapsed_total:.1f} arch/s)")
-        
-    finally:
-        conn_local.close()
+        nuevos += 1
+        pendientes_commit += 1
+        if pendientes_commit >= DB_COMMIT_SIZE:
+            conn_local.commit()
+            pendientes_commit = 0
+            
+    conn_local.commit()
+    conn_local.close()
+    log_timing(f"✨ Proceso terminado. Procesados: {nuevos}. Encontrados en DB: {encontrados}.")
 
 def run_etapa_indexar_optimizado():
-    conn_local, existentes = preparar_base_local()
-    conn_local.close()
-    
-    lista = iter_archivos_nuevos_optimizado(existentes)
-    if not lista:
-        log_timing("☕ Sin archivos nuevos.")
-        return
-    
-    log_timing(f"🎯 Procesando {len(lista)} archivos nuevos...")
-    procesar_archivos_paralelo(lista)
+    procesar_estrategia_inversa()
 
 if __name__ == "__main__":
     run_etapa_indexar_optimizado()

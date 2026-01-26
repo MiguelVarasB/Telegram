@@ -317,8 +317,8 @@ async def sync_con_stop(
         # --- Filtro Adicional --- #
         detalles_chats = await obtener_detalles_chats_para_filtrado(chats_iniciales)
         chats_filtrados = []
-        dias_atras = datetime.now() - timedelta(days=DIAS_ATRAS)
-        
+        dias_atras_dt = datetime.now() - timedelta(days=DIAS_ATRAS)
+
         for chat_id in chats_iniciales:
             detalles = detalles_chats.get(chat_id)
             if not detalles:
@@ -326,17 +326,28 @@ async def sync_con_stop(
                 continue
 
             name, last_date, indexados, faltantes = detalles
+            if faltantes is not None and faltantes <= 1:
+                log_timing(
+                    f"  -> Excluyendo chat '{name}' ({chat_id}): faltantes={faltantes} (<=1)."
+                )
+                continue
             
             # Condición de exclusión: si el último mensaje es antiguo Y ya hay suficientes indexados
-            if last_date and last_date < dias_atras and indexados > 30 and faltantes > 0:
-                log_timing(f"  -> Excluyendo chat '{name}' ({chat_id}): Sin actividad reciente ({last_date.strftime('%Y-%m-%d')}) y {indexados} indexados.")
+            if (
+                dias_atras_dt
+                and last_date
+                and last_date < dias_atras_dt
+                and indexados > 30
+                and faltantes > 0
+            ):
+                log_timing(
+                    f"  -> Excluyendo chat '{name}' ({chat_id}): Sin actividad reciente ({last_date.strftime('%Y-%m-%d')}) y {indexados} indexados."
+                )
                 continue
             
             chats_filtrados.append(chat_id)
         
         chats = chats_filtrados
-        # --- Fin Filtro --- #
-
         log_timing(f"🚀 Iniciando revisión de {len(chats)} chats (concurrencia: {concurrencia})...")
         
         # Procesar en lotes concurrentes para evitar el delay de 11s entre chats

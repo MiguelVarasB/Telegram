@@ -23,7 +23,8 @@ from utils import save_image_as_webp, log_timing
 from utils.database_helpers import ensure_column
 
 # --- CONFIGURACIÓN ---
-LIMITE =10000  # Cantidad de videos a procesar en esta vuelta
+LIMITE = 100000  # Cantidad de videos a procesar en esta vuelta
+MAX_CHATS_A_PROCESAR = 10  # Cantidad máxima de chats a procesar en una sola ejecución
 BATCH =   30  # Tamaño del paquete de reenvío (No subir de 30)
 SLEEP_ENVIO = (3, 10)  # rango de espera aleatoria entre envíos
 MAX_CHATS_CONCURRENTES = 3  # cuántos chats se procesan en paralelo
@@ -53,6 +54,7 @@ async def marcar_chat_fallido(chat_id, razon):
             WHERE chat_id = ?
 
               AND has_thumb = 0
+              
               AND dump_message_id IS NULL
               AND (dump_fail IS NULL OR dump_fail = 0)
             """,
@@ -79,23 +81,52 @@ async def main():
     params = []
     if exclude_chats:
         placeholders = ",".join(["?"] * len(exclude_chats))
-        exclude_clause = f" AND chat_id NOT IN ({placeholders}) "
+        exclude_clause = f" AND v.chat_id NOT IN ({placeholders}) "
         params.extend(exclude_chats)
 
-    params.append(LIMITE)
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            f"""
-            SELECT id, chat_id, message_id 
-            FROM videos_telegram 
-            WHERE has_thumb = 0 AND dump_message_id IS NULL 
-              AND (dump_fail IS NULL OR dump_fail = 0)
-            and chat_id!=5490529645
-            {exclude_clause}
+        # 1. Encontrar los N chats con más videos pendientes
+        query_top_chats = f"""
+            SELECT v.chat_id, COUNT(v.id) as video_count
+            FROM videos_telegram v
+            JOIN chats c ON v.chat_id = c.chat_id
+            WHERE v.has_thumb = 0
+              AND v.dump_message_id IS NULL
+              AND (v.dump_fail IS NULL OR v.dump_fail = 0)
+              AND c.has_protected_content = 0
+              AND v.oculto = 0
+              AND v.chat_id != 5490529645
+              {exclude_clause}
+            GROUP BY v.chat_id
+            ORDER BY video_count DESC
             LIMIT ?
-        """,
-            tuple(params),
-        ) as cursor:
+        """
+        params_top_chats = params + [MAX_CHATS_A_PROCESAR]
+        async with db.execute(query_top_chats, tuple(params_top_chats)) as cursor:
+            top_chats = await cursor.fetchall()
+
+        if not top_chats:
+            log_timing("✅ No hay chats con videos pendientes.")
+            return {"pendientes": 0, "reenviados": 0}
+
+        top_chat_ids = [row[0] for row in top_chats]
+        log_timing(f"🔝 Top {len(top_chat_ids)} chats seleccionados para procesar.")
+
+        # 2. Obtener todos los videos pendientes de esos chats
+        placeholders_chats = ",".join(['?'] * len(top_chat_ids))
+        query_videos = f"""
+            SELECT id, chat_id, message_id
+            FROM videos_telegram
+            WHERE chat_id IN ({placeholders_chats})
+              AND has_thumb = 0
+              AND oculto = 0
+              AND dump_message_id IS NULL
+              AND (dump_fail IS NULL OR dump_fail = 0)
+            ORDER BY chat_id
+            LIMIT ?
+        """
+        params_videos = top_chat_ids + [LIMITE]
+        async with db.execute(query_videos, tuple(params_videos)) as cursor:
             pendientes = await cursor.fetchall()
 
     if not pendientes:
